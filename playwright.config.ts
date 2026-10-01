@@ -1,6 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = "http://127.0.0.1:3100";
+const authenticated = process.env.E2E_AUTH_LOCAL === "1";
+if (authenticated && process.env.NEXT_PUBLIC_SUPABASE_URL !== "http://127.0.0.1:54321") {
+  throw new Error("Authenticated browser tests require the disposable local Supabase API");
+}
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -13,6 +17,9 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: false,
     timeout: 30_000,
-    env: { NEXT_PUBLIC_SUPABASE_URL: "", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "" }
+    env: {
+      NEXT_PUBLIC_SUPABASE_URL: authenticated ? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "" : "",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: authenticated ? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "" : ""
+    }
   }
 });

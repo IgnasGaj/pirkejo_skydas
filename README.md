@@ -46,6 +46,12 @@ supabase gen types typescript --local --schema public > src/lib/supabase/databas
 
 The current type file preserves the SQL checks' literal values for purchase channel, document type, and currency. Review generated differences against the migration before committing them.
 
+### Dependency audit
+
+`npm audit` currently reports two entries, `next` and its nested `postcss@8.4.31`, for one underlying PostCSS dependency. The [XSS advisory](https://github.com/advisories/GHSA-qx2v-qp2m-jg93) requires attacker-controlled CSS to be parsed, stringified, and embedded in an HTML `<style>` element. The [source-map advisories](https://github.com/advisories/GHSA-6g55-p6wh-862q), [follow-up](https://github.com/advisories/GHSA-r28c-9q8g-f849), and [incomplete-fix report](https://github.com/advisories/GHSA-fxqj-rqcc-2cmp) require attacker-controlled CSS with a `sourceMappingURL` to reach the vulnerable processor. In this application Next's PostCSS runs for CSS imports during development and production builds. The app imports its own `src/app/globals.css`; purchase evidence accepts images and PDF, not CSS, and no route parses user CSS. These conditions make the reported paths inapplicable to the current application inputs, but the nested vulnerable package remains installed.
+
+Next.js 15.5.27 still pins PostCSS 8.4.31, while the app's Tailwind/Vite dependencies resolve a patched PostCSS. A [15.5 backport proposal](https://github.com/vercel/next.js/pull/97336) for PostCSS 8.5.23 was closed after upstream test failures. No published 15.5 patch containing that bump was available at this review. We did not override Next's exact dependency pin; review a supported 15.5 patch when released and rerun `npm audit` and the full check suite. The Vitest redirect-mock advisory was resolved by upgrading Vitest from 3.2.7 to the first patched stable release, 4.1.11.
+
 ## Privacy verification
 
 Use a disposable, migrated local or dedicated test Supabase project and two ordinary accounts, A and B. Use only the public URL and publishable key; never use a service-role key for the verification. Do not run destructive checks against ordinary user data.
@@ -56,4 +62,17 @@ Use a disposable, migrated local or dedicated test Supabase project and two ordi
 4. Repeat direct purchase, metadata, and Storage reads without a session; they must be denied. Verify B can perform the same allowed operations on B's own test purchase and evidence.
 5. Sign back in as A, verify A's records are still intact, then delete only the test-created evidence and purchase. Clean up B's test records as well. Inspect the database and Storage bucket to confirm cleanup.
 
-An issued signed URL is a temporary bearer link and generally remains usable until expiry; test unauthorized issuance and direct Storage access separately. Unit and browser smoke tests do not prove live RLS. Authenticated lifecycle automation is deferred until a dedicated test backend and credentials outside Git are available.
+An issued signed URL is a temporary bearer link and generally remains usable until expiry; test unauthorized issuance and direct Storage access separately. Unit and credential-free browser smoke tests do not prove live RLS.
+
+The opt-in `npm run test:e2e:auth` automates the two-account checks and purchase lifecycle against **local** Supabase only. Start the local stack with `supabase start` and apply the migration. Create and confirm two ordinary test accounts, A and B, using the public client or the app; local confirmation mail is at `http://127.0.0.1:54324`. Put a JSON file outside Git with this shape:
+
+```json
+{
+  "url": "http://127.0.0.1:54321",
+  "key": "<local publishable key from supabase status>",
+  "a": { "id": "<A user UUID>", "email": "<A test email>", "password": "<A test password>" },
+  "b": { "id": "<B user UUID>", "email": "<B test email>", "password": "<B test password>" }
+}
+```
+
+Run the production build with `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` set to the local publishable key. Then set `E2E_AUTH_LOCAL=1` and `E2E_AUTH_CREDENTIALS_FILE` to the absolute path of that JSON file and run `npm run test:e2e:auth`. The test refuses a nonlocal API, creates uniquely named purchase and evidence records, and cleans up those records even when it fails. Missing opt-in settings produce an explicit skip. Dispose of the local test stack with `supabase stop --no-backup` when finished; do not use ordinary user data or production credentials.
