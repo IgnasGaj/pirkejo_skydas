@@ -63,11 +63,11 @@ export function validateDocumentFile(file: { name: string; type: string; size: n
 export async function verifyFileSignature(file: File) {
   const bytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
   const text = String.fromCharCode(...bytes);
-  if (file.type === "application/pdf") return text.startsWith("%PDF-");
-  if (file.type === "image/png") return bytes.slice(0, 8).every((value, index) => value === [137, 80, 78, 71, 13, 10, 26, 10][index]);
-  if (file.type === "image/jpeg") return bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
-  if (file.type === "image/webp") return text.startsWith("RIFF") && text.slice(8, 12) === "WEBP";
-  if (file.type === "image/heic" || file.type === "image/heif") return text.slice(4, 8) === "ftyp" && /^(hei[cf]|mif1|msf1)/.test(text.slice(8, 12));
+  if (file.type === "application/pdf") return bytes.length >= 5 && text.startsWith("%PDF-");
+  if (file.type === "image/png") return bytes.length >= 8 && bytes.slice(0, 8).every((value, index) => value === [137, 80, 78, 71, 13, 10, 26, 10][index]);
+  if (file.type === "image/jpeg") return bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  if (file.type === "image/webp") return bytes.length >= 12 && text.startsWith("RIFF") && text.slice(8, 12) === "WEBP";
+  if (file.type === "image/heic" || file.type === "image/heif") return bytes.length >= 12 && text.slice(4, 8) === "ftyp" && /^(hei[cf]|mif1|msf1)/.test(text.slice(8, 12));
   return false;
 }
 

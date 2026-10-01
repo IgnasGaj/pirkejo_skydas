@@ -15,6 +15,16 @@ Use Node.js 22 LTS and npm 10 or newer.
 
 The existing `/returns` and `/defective-product` flows work without Supabase configuration or an account. The purchase vault requires the Supabase project and environment variables.
 
+## Receipt scanning
+
+`/purchases/new` offers manual entry or scan-assisted entry. JPEG, PNG, and browser-decodable WebP images can be scanned; JPEG, PNG, WebP, HEIC, HEIF, and PDF remain valid private evidence files (up to 15 MiB). PDF and HEIC/HEIF require manual entry this sprint. A camera-oriented file input is available alongside ordinary file selection; camera formats vary by device. Existing saved `RECEIPT` images can be scanned from their purchase detail page. Only explicitly selected corrections are applied, and a changed purchase must be reviewed again.
+
+The browser loads Tesseract.js **7.0.0** and its Web Worker only when the user selects **Nuskaityti**. The worker, Tesseract core/WASM **7.0.0**, and Lithuanian and English language files are served from this application's `/ocr/` path. `npm ci` runs `scripts/prepare-ocr.mjs`; `npm run prepare:ocr` can repeat it. The script copies the pinned npm worker/core files and verifies SHA-256 of the checked-in language archives and their decompressed data. OCR has no runtime third-party requests. `assets/ocr/{lit,eng}.traineddata.gz` came from [tessdata_fast commit 8741641](https://github.com/tesseract-ocr/tessdata_fast/tree/87416418657359cb625c412a48b6e1d6d41c29bd) (Apache 2.0). Raw SHA-256: `lit` `1e383df5b055583bc01cb5764ecdf74c540753f2cb3f8205e7105361da4bc989`; `eng` `7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2`. Archive checksums are in the preparation script. [Tesseract.js](https://github.com/naptha/tesseract.js) and [tesseract.js-core](https://github.com/naptha/tesseract.js-core) are Apache 2.0; their package licenses are installed under `node_modules`.
+
+Receipt pixels and extracted text stay in browser memory until the user intentionally saves the original file and confirmed purchase values. The app stores the original evidence privately; it does not store OCR text. Refreshing discards an unsaved review. The scanner rejects decoded images above 20 megapixels and cancels after 90 seconds; it does not resize images. Large or rotated images may recognize poorly, so the manual form remains available. A multi-item receipt still creates one named product per confirmation. Its total is shown separately and never copied into the chosen product's price.
+
+A save uses stable purchase and document IDs in the new-purchase URL for retries; the URL contains no receipt content or OCR text. If the purchase succeeds but receipt upload fails, the form says **“Pirkinys išsaugotas, tačiau čekio įkelti nepavyko.”**, keeps a link to that purchase, and retries the attachment against it. Reloading restores the owned saved purchase, though the browser requires selecting the file again. Storage and PostgreSQL are not one transaction; a metadata failure triggers object cleanup, and cleanup failures are surfaced in server logs. Both the server-action and middleware request-body limits are 16 MiB so a multipart file close to the 15 MiB evidence limit can pass through the app.
+
 ## Checks
 
 Run these commands in order:
@@ -36,7 +46,9 @@ NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY= npm run build
 npm run test:e2e
 ```
 
-If another `next dev` process is running in the same checkout, its `.next` output can collide with the production build. Stop it temporarily or build and run browser tests in an isolated copy. CI uses a fresh checkout and runs all checks on pushes and pull requests. The `verify` job is the check that can later be made required by branch protection.
+The `tests/e2e/ocr.spec.ts` browser test runs the **real** Tesseract worker against a synthetic receipt and checks that OCR assets are requested only after invocation, from the application origin. Parser and retry unit tests use synthetic data and injected adapters. Authenticated scan/create/update/delete and RLS checks require the disposable local Supabase setup below; browser tests without it skip those cases. A production build prepares OCR assets automatically, and CI runs the real worker test.
+
+If another `next dev` process is running in the same checkout, its `.next` output can collide with the production build and cause misleading webpack runtime errors. Stop it temporarily, use an isolated copy, or set `NEXT_DIST_DIR=.next-sprint04` for both `npm run build` and `npm run test:e2e`. CI uses a fresh checkout and runs all checks on pushes and pull requests. The `verify` job is the check that can later be made required by branch protection.
 
 Database types in `src/lib/supabase/database.types.ts` are derived from `supabase/migrations/20261001000000_purchase_vault.sql`; they have not been compared with a deployed project. After applying migrations to a local Supabase stack, regenerate and review them with:
 
@@ -64,7 +76,7 @@ Use a disposable, migrated local or dedicated test Supabase project and two ordi
 
 An issued signed URL is a temporary bearer link and generally remains usable until expiry; test unauthorized issuance and direct Storage access separately. Unit and credential-free browser smoke tests do not prove live RLS.
 
-The opt-in `npm run test:e2e:auth` automates the two-account checks and purchase lifecycle against **local** Supabase only. Start the local stack with `supabase start` and apply the migration. Create and confirm two ordinary test accounts, A and B, using the public client or the app; local confirmation mail is at `http://127.0.0.1:54324`. Put a JSON file outside Git with this shape:
+The opt-in `npm run test:e2e:auth` runs sequentially against **local** Supabase only. It covers the two-account purchase lifecycle, real scan-assisted save, private receipt loading, selected corrections and stale edit rejection, a near-15 MiB upload, and PDF manual fallback. Start the local stack with `supabase start` and apply the migration. Create and confirm two ordinary test accounts, A and B, using the public client or the app; local confirmation mail is at `http://127.0.0.1:54324`. Put a JSON file outside Git with this shape:
 
 ```json
 {
@@ -75,4 +87,4 @@ The opt-in `npm run test:e2e:auth` automates the two-account checks and purchase
 }
 ```
 
-Run the production build with `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` set to the local publishable key. Then set `E2E_AUTH_LOCAL=1` and `E2E_AUTH_CREDENTIALS_FILE` to the absolute path of that JSON file and run `npm run test:e2e:auth`. The test refuses a nonlocal API, creates uniquely named purchase and evidence records, and cleans up those records even when it fails. Missing opt-in settings produce an explicit skip. Dispose of the local test stack with `supabase stop --no-backup` when finished; do not use ordinary user data or production credentials.
+Run the production build with `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` set to the local publishable key. Then set `E2E_AUTH_LOCAL=1` and `E2E_AUTH_CREDENTIALS_FILE` to the absolute path of that JSON file and run `npm run test:e2e:auth`. Set `NEXT_DIST_DIR=.next-sprint04` for both commands if development is using `.next`. The tests refuse a nonlocal API, create uniquely named purchase and evidence records, and clean up those records even when a check fails. Missing opt-in settings produce an explicit skip. Set `E2E_CAPTURE_REVIEW=1` to save desktop and mobile Chromium review screenshots under `/tmp`; these are browser viewport checks, not actual iPhone/Safari or Android device tests. Dispose of the local test stack with `supabase stop --no-backup` when finished; do not use ordinary user data or production credentials.

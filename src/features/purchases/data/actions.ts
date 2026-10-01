@@ -21,7 +21,7 @@ function purchaseInput(form: FormData) {
 function validId(id: string) { return z.uuid().safeParse(id).success; }
 function failure(path: string, kind: string): never { redirect(`${path}${path.includes("?") ? "&" : "?"}state=${kind}`); }
 
-export type PurchaseFormState = { error: string | null; values?: Record<string, string>; attempt?: number };
+export type PurchaseFormState = { error: string | null; values?: Record<string, string>; attempt?: number; savedPurchaseId?: string };
 
 function failedForm(previous: PurchaseFormState, form: FormData, error: string): PurchaseFormState {
   const fields = ["productName", "sellerName", "purchaseDate", "receivedDate", "purchaseChannel", "price", "referenceNumber", "notes"];

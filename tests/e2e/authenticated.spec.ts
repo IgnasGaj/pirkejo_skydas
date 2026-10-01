@@ -30,7 +30,7 @@ async function login(page: Page, user: TestUser) {
 test("two-account RLS and authenticated purchase lifecycle", async ({ page, browser }) => {
   test.setTimeout(120_000);
   const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
-  expect(credentials.url).toBe("http://127.0.0.1:54321");
+  expect(credentials.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   const options = { auth: { persistSession: false, autoRefreshToken: false } };
   const a = createClient<Database>(credentials.url, credentials.key, options);
   const b = createClient<Database>(credentials.url, credentials.key, options);
@@ -48,7 +48,7 @@ test("two-account RLS and authenticated purchase lifecycle", async ({ page, brow
     await page.goto("/purchases/new");
     await expect(page).toHaveURL(/\/login\?next=/);
     await login(page, credentials.a);
-    await expect(page).toHaveURL(/\/purchases\/new$/);
+    await expect(page).toHaveURL(/\/purchases\/new\?draft=[0-9a-f-]{36}&document=[0-9a-f-]{36}$/);
     const product = `Sprint 03.1 test ${randomUUID()}`;
     await page.getByLabel("Ką pirkote?").fill(product);
     await page.getByLabel("Pardavėjas").fill("Bandymų parduotuvė");

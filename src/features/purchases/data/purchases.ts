@@ -30,8 +30,15 @@ function fields(input: PurchaseInput) {
   };
 }
 
-export async function createPurchase(client: Client, userId: string, input: PurchaseInput): Promise<Purchase> {
-  const { data, error } = await client.from("purchases").insert({ ...fields(input), user_id: userId }).select("*").single();
+export async function createPurchase(client: Client, userId: string, input: PurchaseInput, id?: string): Promise<Purchase> {
+  const { data, error } = await client.from("purchases").insert({ ...fields(input), user_id: userId, ...(id ? { id } : {}) }).select("*").single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updatePurchaseIfCurrent(client: Client, userId: string, id: string, updatedAt: string, input: PurchaseInput): Promise<Purchase | null> {
+  const { data, error } = await client.from("purchases").update(fields(input)).eq("user_id", userId)
+    .eq("id", id).eq("updated_at", updatedAt).select("*").maybeSingle();
   if (error) throw error;
   return data;
 }

@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = "http://127.0.0.1:3100";
 const authenticated = process.env.E2E_AUTH_LOCAL === "1";
-if (authenticated && process.env.NEXT_PUBLIC_SUPABASE_URL !== "http://127.0.0.1:54321") {
+if (authenticated && !/^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "")) {
   throw new Error("Authenticated browser tests require the disposable local Supabase API");
 }
 
