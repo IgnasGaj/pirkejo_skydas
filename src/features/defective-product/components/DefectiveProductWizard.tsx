@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Check, CircleHelp, ExternalLink, RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { questions } from "../content/questions.lt";
 import { evaluateDefectiveProductCase } from "../domain/evaluateDefectiveProductCase";
 import { nextDefectiveStep, type DefectiveStep } from "../domain/flow";
 import type { DefectiveDecisionResult, DefectiveProductCaseInput, RequestedRemedy } from "../domain/types";
+import type { Purchase } from "@/features/purchases/domain/types";
 
 function localToday(): string {
   const now = new Date();
@@ -43,12 +44,16 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DefectiveDeci
   </div>;
 }
 
-export function DefectiveProductWizard() {
+export function DefectiveProductWizard({ purchase = null }: { purchase?: Pick<Purchase, "purchase_date" | "received_date" | "purchase_channel"> | null }) {
   const [answers, setAnswers] = useState<DefectiveProductCaseInput>(() => ({ asOfDate: localToday() }));
   const [history, setHistory] = useState<DefectiveProductCaseInput[]>([]);
   const [draft, setDraft] = useState("");
   const step = nextDefectiveStep(answers);
   const decision = step === null ? evaluateDefectiveProductCase(answers) : null;
+  useEffect(() => {
+    if (step === "deliveredAt" && purchase?.purchase_channel === "DISTANCE" && purchase.received_date && purchase.received_date <= answers.asOfDate) setDraft(purchase.received_date);
+    else if (step === "purchasedAt" && purchase?.purchase_date && purchase.purchase_date <= answers.asOfDate) setDraft(purchase.purchase_date);
+  }, [step, purchase, answers.asOfDate]);
   function save(next: DefectiveProductCaseInput) { setHistory((items) => [...items, answers]); setAnswers(next); setDraft(""); }
   function choose(current: DefectiveStep, value: string) {
     const next = { ...answers };

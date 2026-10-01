@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Check, CircleHelp, ExternalLink, RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { getProductClarification, productCategories } from "../domain/categories
 import { evaluateReturnCase } from "../domain/evaluateReturnCase";
 import type { DecisionResult, ReturnCaseInput } from "../domain/types";
 import { legalSources } from "@/legal/sources";
+import type { Purchase } from "@/features/purchases/domain/types";
 
 type Step = "defective" | "defectClarification" | "buyer" | "seller" | "purchaseChannel" | "purchaseDate" | "deliveryDate" | "productCategory" | "productSubtype" | "used" | "appearanceIntact" | "purchaseEvidence" | "customMade" | "perishable" | "sealedHygiene" | "sealOpened" | "otherDistanceException" | "handlingLevel";
 
@@ -100,12 +101,17 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DecisionResul
   </div>;
 }
 
-export function ReturnWizard() {
+export function ReturnWizard({ purchase = null }: { purchase?: Pick<Purchase, "purchase_date" | "received_date" | "purchase_channel"> | null }) {
   const [answers, setAnswers] = useState<ReturnCaseInput>(() => ({ asOfDate: localToday() }));
   const [history, setHistory] = useState<ReturnCaseInput[]>([]);
   const [dateDraft, setDateDraft] = useState("");
   const step = nextStep(answers);
   const decision = step === null ? evaluateReturnCase(answers) : null;
+
+  useEffect(() => {
+    if (step === "purchaseDate" && purchase?.purchase_date && purchase.purchase_date <= answers.asOfDate) setDateDraft(purchase.purchase_date);
+    else if (step === "deliveryDate" && purchase?.purchase_channel === "DISTANCE" && purchase.received_date && purchase.received_date <= answers.asOfDate) setDateDraft(purchase.received_date);
+  }, [step, purchase, answers.asOfDate]);
 
   function choose(key: Step, value: string) {
     setHistory((previous) => [...previous, answers]);
