@@ -9,7 +9,7 @@ Use Node.js 22 LTS and npm 10 or newer.
 1. Install dependencies: `npm ci`.
 2. Create a Supabase project. Copy its Project URL and publishable key from the project's Connect or API settings page.
 3. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. The web app does not need a service-role key.
-4. Link the project with `supabase link --project-ref <project-ref>`. Review `supabase config diff` and apply the local callback allowlist with `supabase config push`. Review pending migrations with `supabase migration list --linked` and `supabase db push --linked --dry-run`, then apply them with `supabase db push --linked`. The migration creates both tables, indexes, constraints, RLS policies, and the private Storage bucket and policies.
+4. Link the project with `supabase link --project-ref <project-ref>`. Review `supabase config diff` and apply the local callback allowlist with `supabase config push`. Review pending migrations with `supabase migration list --linked` and `supabase db push --linked --dry-run`, then apply them with `supabase db push --linked`. The migrations create the purchase vault, private Storage policies, and the reviewed-receipt upload claim. Apply both migrations before running the updated app.
 5. In Authentication → Providers, enable Email/password. Choose whether email confirmation is required. If it is, configure the confirmation email template for SSR with a link to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` instead of the default confirmation URL. Set the Authentication site URL to your app origin (for local development, `http://localhost:3000`). The local `/auth/confirm` callback is listed in `supabase/config.toml`; add the production origin and callback before deploying.
 6. Run `npm run dev` and open `http://localhost:3000`.
 
@@ -23,7 +23,7 @@ The browser loads Tesseract.js **7.0.0** and its Web Worker only when the user s
 
 Receipt pixels and extracted text stay in browser memory until the user intentionally saves the original file and confirmed purchase values. The app stores the original evidence privately; it does not store OCR text. Refreshing discards an unsaved review. The scanner rejects decoded images above 20 megapixels and cancels after 90 seconds; it does not resize images. Large or rotated images may recognize poorly, so the manual form remains available. A multi-item receipt still creates one named product per confirmation. Its total is shown separately and never copied into the chosen product's price.
 
-A save uses stable purchase and document IDs in the new-purchase URL for retries; the URL contains no receipt content or OCR text. If the purchase succeeds but receipt upload fails, the form says **“Pirkinys išsaugotas, tačiau čekio įkelti nepavyko.”**, keeps a link to that purchase, and retries the attachment against it. Reloading restores the owned saved purchase, though the browser requires selecting the file again. Storage and PostgreSQL are not one transaction; a metadata failure triggers object cleanup, and cleanup failures are surfaced in server logs. Both the server-action and middleware request-body limits are 16 MiB so a multipart file close to the 15 MiB evidence limit can pass through the app.
+A save uses stable purchase and document IDs in the new-purchase URL for retries; the URL contains no receipt content or OCR text. If the purchase succeeds but receipt upload fails, the form says **“Pirkinys išsaugotas, tačiau čekio įkelti nepavyko.”**, keeps a link to that purchase, and retries the attachment against it. Reloading restores the owned saved purchase, though the browser requires selecting the file again. A reviewed receipt first reserves its document row with an expiring database claim and SHA-256 of the original bytes. Only the claim owner uploads; another tab waits, and an interrupted claim can be recovered without removing an object that another request saved. Pending rows are hidden from the evidence list. Ordinary evidence uploads retain their metadata-failure cleanup. Both the server-action and middleware request-body limits are 16 MiB so a multipart file close to the 15 MiB evidence limit can pass through the app.
 
 ## Checks
 
@@ -46,11 +46,11 @@ NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY= npm run build
 npm run test:e2e
 ```
 
-The `tests/e2e/ocr.spec.ts` browser test runs the **real** Tesseract worker against a synthetic receipt and checks that OCR assets are requested only after invocation, from the application origin. Parser and retry unit tests use synthetic data and injected adapters. Authenticated scan/create/update/delete and RLS checks require the disposable local Supabase setup below; browser tests without it skip those cases. A production build prepares OCR assets automatically, and CI runs the real worker test.
+The `tests/e2e/ocr.spec.ts` browser test runs the **real** Tesseract worker against a synthetic receipt and checks that OCR assets are requested only after invocation, from the application origin. Parser and retry unit tests use synthetic data and injected adapters; the existing-receipt review interaction tests use a mocked OCR result. Authenticated scan/create/update/delete and RLS checks require the disposable local Supabase setup below; browser tests without it skip those cases. A production build prepares OCR assets automatically, and CI runs the real worker test.
 
 If another `next dev` process is running in the same checkout, its `.next` output can collide with the production build and cause misleading webpack runtime errors. Stop it temporarily, use an isolated copy, or set `NEXT_DIST_DIR=.next-sprint04` for both `npm run build` and `npm run test:e2e`. CI uses a fresh checkout and runs all checks on pushes and pull requests. The `verify` job is the check that can later be made required by branch protection.
 
-Database types in `src/lib/supabase/database.types.ts` are derived from `supabase/migrations/20261001000000_purchase_vault.sql`; they have not been compared with a deployed project. After applying migrations to a local Supabase stack, regenerate and review them with:
+Database types in `src/lib/supabase/database.types.ts` are derived from both local migrations; they have not been compared with a deployed project. After applying migrations to a local Supabase stack, regenerate and review them with:
 
 ```bash
 supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts
@@ -76,7 +76,7 @@ Use a disposable, migrated local or dedicated test Supabase project and two ordi
 
 An issued signed URL is a temporary bearer link and generally remains usable until expiry; test unauthorized issuance and direct Storage access separately. Unit and credential-free browser smoke tests do not prove live RLS.
 
-The opt-in `npm run test:e2e:auth` runs sequentially against **local** Supabase only. It covers the two-account purchase lifecycle, real scan-assisted save, private receipt loading, selected corrections and stale edit rejection, a near-15 MiB upload, and PDF manual fallback. Start the local stack with `supabase start` and apply the migration. Create and confirm two ordinary test accounts, A and B, using the public client or the app; local confirmation mail is at `http://127.0.0.1:54324`. Put a JSON file outside Git with this shape:
+The opt-in `npm run test:e2e:auth` runs sequentially against **local** Supabase only. It covers the two-account purchase lifecycle, a concurrent database claim, real scan-assisted save and cancellation, private receipt loading, selected corrections, stale or deleted-document rejection, a near-15 MiB upload, and PDF manual fallback. CI starts a disposable local Supabase stack and creates two ordinary accounts with email confirmation disabled only in its temporary checkout. For a manual run, start the local stack with `supabase start` and apply both migrations. Create and confirm two ordinary test accounts, A and B, using the public client or the app; local confirmation mail is at `http://127.0.0.1:54324`. Put a JSON file outside Git with this shape:
 
 ```json
 {

@@ -53,6 +53,30 @@ describe("deterministic receipt suggestions", () => {
     const refund = parseReceiptText("Parduotuvė\nGRĄŽINIMAS\nKava -2,50", today);
     expect(refund.products.every((p) => p.amountCents === null)).toBe(true);
   });
+  it.each(["$5.00", "5.00$", "£ 5.00", "5.00 £", "zł 5,00", "5,00 zł", "USD 5.00", "5.00 PLN"])("does not label %s as EUR", (amount) => {
+    const result = parseReceiptText(`SHOP\nCoffee ${amount}\nTOTAL ${amount}`, today);
+    expect(result.products[0]?.amountCents).toBeNull();
+    expect(result.receiptTotal).toBeNull();
+    expect(result.warnings.join(" ")).toContain("kita valiuta");
+  });
+  it("suppresses amounts when EUR and another currency are mixed", () => {
+    const result = parseReceiptText("SHOP\nCoffee 5.00 EUR\nTea $2.00\nTOTAL 7.00 EUR", today);
+    expect(result.products.every((product) => product.amountCents === null)).toBe(true);
+    expect(result.receiptTotal).toBeNull();
+  });
+  it.each([
+    "SHOP\nKava 5,00\nNuolaida -1,00\nTOTAL 4,00 EUR",
+    "SHOP\nKava 5,00\nArbata 3,00\nBendra nuolaida -1,00\nTOTAL 7,00 EUR"
+  ])("keeps discounted product prices blank", (receipt) => {
+    const result = parseReceiptText(receipt, today);
+    expect(result.products.length).toBeGreaterThan(0);
+    expect(result.products.every((product) => product.amountCents === null)).toBe(true);
+    expect(result.warnings.join(" ")).toContain("nuolaida");
+  });
+  it.each(["Vilniaus g. 12", "Kasininkas Jonas", "Įmonės kodas 123456789", "PVM kodas LT123456789", "Terminalas 12", "Bankas SEB", "Mokėjimo kortelė VISA"])("does not suggest %s as seller", (header) => {
+    const result = parseReceiptText(`${header}\nUAB Žalias takas\nKava 3,50`, today);
+    expect(result.seller?.value).toBe("UAB Žalias takas");
+  });
   it("bounds and preserves noisy literal text", () => {
     const text = "<script>alert('x')</script>\n" + "x".repeat(25_000);
     const result = parseReceiptText(text, today);

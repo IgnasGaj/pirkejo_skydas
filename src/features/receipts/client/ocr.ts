@@ -6,7 +6,7 @@ export const scanFallback = "Šį failą galite išsaugoti kaip pirkimo įrodym�
 export type OcrResult = { text: string; confidence: number };
 export type OcrProgress = { status: string; progress: number };
 export type OcrWorker = { recognize: (file: File) => Promise<{ data: OcrResult }>; terminate: () => Promise<unknown> };
-export type WorkerFactory = (onProgress: (value: OcrProgress) => void) => Promise<OcrWorker>;
+export type WorkerFactory = (onProgress: (value: OcrProgress) => void, onSpawn: (worker: Pick<OcrWorker, "terminate">) => void) => Promise<OcrWorker>;
 
 async function inspectImage(file: File) {
   if (typeof createImageBitmap === "function") {
@@ -25,12 +25,27 @@ async function inspectImage(file: File) {
   } finally { URL.revokeObjectURL(url); }
 }
 
-const defaultFactory: WorkerFactory = async (onProgress) => {
+const defaultFactory: WorkerFactory = async (onProgress, onSpawn) => {
   const { createWorker } = await import("tesseract.js");
-  return createWorker(["lit", "eng"], 1, {
-    workerPath: "/ocr/worker.min.js", corePath: "/ocr/core", langPath: "/ocr",
-    workerBlobURL: false, logger: (message) => onProgress({ status: message.status, progress: message.progress })
-  });
+  // Tesseract.js 7 creates the browser Worker synchronously but returns its
+  // handle only after language initialization. Capture that handle during the
+  // synchronous constructor call so cancellation can stop preparation too.
+  const OriginalWorker = globalThis.Worker;
+  class CapturedWorker extends OriginalWorker {
+    constructor(url: string | URL, options?: WorkerOptions) {
+      super(url, options);
+      onSpawn({ terminate: async () => { this.terminate(); } });
+    }
+  }
+  let preparation: Promise<OcrWorker>;
+  globalThis.Worker = CapturedWorker;
+  try {
+    preparation = createWorker(["lit", "eng"], 1, {
+      workerPath: "/ocr/worker.min.js", corePath: "/ocr/core", langPath: "/ocr",
+      workerBlobURL: false, logger: (message) => onProgress({ status: message.status, progress: message.progress })
+    });
+  } finally { globalThis.Worker = OriginalWorker; }
+  return preparation;
 };
 
 let activeToken: symbol | null = null;
@@ -40,6 +55,7 @@ export class ReceiptOcrSession {
   constructor(private readonly factory: WorkerFactory = defaultFactory, private readonly pixels: (file: File) => Promise<number> = inspectImage, private readonly timeoutMs = SCAN_TIMEOUT_MS) {}
   private readonly token = Symbol("receipt scan");
   private worker: OcrWorker | null = null;
+  private preparingWorker: Pick<OcrWorker, "terminate"> | null = null;
   private generation = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private abortReject: ((reason: Error) => void) | null = null;
@@ -52,7 +68,9 @@ export class ReceiptOcrSession {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     void this.worker?.terminate();
+    void this.preparingWorker?.terminate();
     this.worker = null;
+    this.preparingWorker = null;
   }
 
   async scan(file: File, onProgress: (value: OcrProgress) => void): Promise<OcrResult> {
@@ -70,8 +88,21 @@ export class ReceiptOcrSession {
       if (await Promise.race([this.pixels(file), timeout, cancelled]) > MAX_DECODED_PIXELS) throw new Error("too-many-pixels");
       if (id !== this.generation) throw new Error("cancelled");
       const work = (async () => {
-        const worker = await this.factory((value) => { if (id === this.generation) onProgress(value); });
+        let worker: OcrWorker;
+        try {
+          worker = await this.factory((value) => { if (id === this.generation) onProgress(value); }, (spawned) => {
+            if (id === this.generation) this.preparingWorker = spawned;
+            else void spawned.terminate();
+          });
+        } catch (error) {
+          if (id === this.generation) {
+            void this.preparingWorker?.terminate();
+            this.preparingWorker = null;
+          }
+          throw error;
+        }
         if (id !== this.generation) { await worker.terminate(); throw new Error("cancelled"); }
+        this.preparingWorker = null;
         this.worker = worker;
         const { data } = await worker.recognize(file);
         if (id !== this.generation) throw new Error("cancelled");

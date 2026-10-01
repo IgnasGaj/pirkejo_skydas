@@ -55,14 +55,16 @@ export async function deletePurchaseRow(client: Client, userId: string, id: stri
   if (!data) throw new Error("Purchase deletion affected no row");
 }
 
-export async function listPurchaseDocuments(client: Client, userId: string, purchaseId: string): Promise<PurchaseDocument[]> {
-  const { data, error } = await client.from("purchase_documents").select("*").eq("user_id", userId).eq("purchase_id", purchaseId).order("created_at", { ascending: false });
+export async function listPurchaseDocuments(client: Client, userId: string, purchaseId: string, includePending = false): Promise<PurchaseDocument[]> {
+  let query = client.from("purchase_documents").select("*").eq("user_id", userId).eq("purchase_id", purchaseId);
+  if (!includePending) query = query.eq("upload_state", "READY");
+  const { data, error } = await query.order("created_at", { ascending: false });
   if (error) throw error;
   return data ?? [];
 }
 
 export async function getPurchaseDocument(client: Client, userId: string, purchaseId: string, documentId: string): Promise<PurchaseDocument | null> {
-  const { data, error } = await client.from("purchase_documents").select("*").eq("user_id", userId).eq("purchase_id", purchaseId).eq("id", documentId).maybeSingle();
+  const { data, error } = await client.from("purchase_documents").select("*").eq("user_id", userId).eq("purchase_id", purchaseId).eq("id", documentId).eq("upload_state", "READY").maybeSingle();
   if (error) throw error;
   return data;
 }
@@ -81,7 +83,7 @@ export async function deletePurchaseDocumentRow(client: Client, userId: string, 
 export async function purchaseIdsWithEvidence(client: Client, userId: string, purchaseIds: string[]): Promise<Set<string>> {
   if (!purchaseIds.length) return new Set();
   const { data, error } = await client.from("purchase_documents").select("purchase_id")
-    .eq("user_id", userId).in("purchase_id", purchaseIds);
+    .eq("user_id", userId).eq("upload_state", "READY").in("purchase_id", purchaseIds);
   if (error) throw error;
   return new Set((data ?? []).map((document) => document.purchase_id));
 }

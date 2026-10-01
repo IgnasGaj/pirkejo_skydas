@@ -27,3 +27,13 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - name: Start disposable Supabase
+        run: |
+          sed -i 's/enable_confirmations = true/enable_confirmations = false/' supabase/config.toml
+          npx supabase start
+      - name: Create ordinary local test accounts
+        run: node scripts/prepare-local-e2e.mjs >> "$GITHUB_ENV"
+      - run: npm run build
+      - run: npm run test:e2e:auth
+      - if: always()
+        run: npx supabase stop --no-backup

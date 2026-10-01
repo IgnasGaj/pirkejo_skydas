@@ -6,6 +6,7 @@ import { ReceiptScanner } from "./ReceiptScanner";
 import type { ReceiptSuggestions } from "../domain/types";
 import type { Purchase, PurchaseDocument } from "@/features/purchases/domain/types";
 import type { CorrectionState } from "../data/actions";
+import { editReviewProductName, selectReviewProduct, type ReviewPrice } from "../domain/reviewPrice";
 
 const names = ["productName", "sellerName", "purchaseDate", "price", "referenceNumber"] as const;
 type Name = typeof names[number];
@@ -24,6 +25,7 @@ export function ExistingReceiptScanner({ purchase, document, action }: { purchas
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState<ReceiptSuggestions | null>(null);
   const [proposed, setProposed] = useState<Record<Name, string>>({ productName: "", sellerName: "", purchaseDate: "", price: "", referenceNumber: "" });
+  const [priceOrigin, setPriceOrigin] = useState<ReviewPrice["priceOrigin"]>(null);
   const [state, formAction] = useActionState(action, { error: null });
   const current: Record<Name, string> = {
     productName: purchase.product_name, sellerName: purchase.seller_name, purchaseDate: purchase.purchase_date,
@@ -62,9 +64,20 @@ export function ExistingReceiptScanner({ purchase, document, action }: { purchas
           <p className="font-semibold">Nuskaitytus duomenis patikrinkite prieš išsaugodami. Pažymėkite tik norimus pakeitimus.</p>
           {state.error && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm">{state.error}</p>}
           {suggestions.products.length > 0 && <div><p className="text-sm font-semibold">Galimos prekės</p>{suggestions.products.map((product, index) =>
-            <button type="button" key={`${product.source}-${index}`} onClick={() => setProposed((previous) => ({ ...previous, productName: product.name, price: product.amountCents == null ? previous.price : (product.amountCents / 100).toFixed(2) }))} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-300 bg-white p-3 text-left text-sm">{product.name}{product.amountCents == null ? "" : ` · ${(product.amountCents / 100).toFixed(2)} EUR`}{product.warning ? ` · ${product.warning}` : ""}</button>)}</div>}
+            <button type="button" key={`${product.source}-${index}`} onClick={() => {
+              const next = selectReviewProduct({ productName: proposed.productName, price: proposed.price, priceOrigin }, product);
+              setProposed((previous) => ({ ...previous, productName: next.productName, price: next.price }));
+              setPriceOrigin(next.priceOrigin);
+            }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-300 bg-white p-3 text-left text-sm">{product.name}{product.amountCents == null ? "" : ` · ${(product.amountCents / 100).toFixed(2)} EUR`}{product.warning ? ` · ${product.warning}` : ""}</button>)}</div>}
           {names.map((name) => <div key={name} className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-sm text-slate-600">Dabar: {labels[name]} — <strong>{current[name] || "Neįvesta"}</strong></p>
-            <label className="mt-2 block text-sm font-semibold">Siūloma: {labels[name]}<input name={name} type={name === "purchaseDate" ? "date" : "text"} inputMode={name === "price" ? "decimal" : undefined} value={proposed[name]} onChange={(event) => setProposed((previous) => ({ ...previous, [name]: event.target.value }))} className={fieldClass} /></label>
+            <label className="mt-2 block text-sm font-semibold">Siūloma: {labels[name]}<input name={name} type={name === "purchaseDate" ? "date" : "text"} inputMode={name === "price" ? "decimal" : undefined} value={proposed[name]} onChange={(event) => {
+              if (name === "price") setPriceOrigin("manual");
+              if (name === "productName") {
+                const next = editReviewProductName({ productName: proposed.productName, price: proposed.price, priceOrigin }, event.target.value);
+                setProposed((previous) => ({ ...previous, productName: next.productName, price: next.price }));
+                setPriceOrigin(next.priceOrigin);
+              } else setProposed((previous) => ({ ...previous, [name]: event.target.value }));
+            }} className={fieldClass} /></label>
             <label className="mt-3 flex min-h-11 items-center gap-3 text-sm font-semibold"><input type="checkbox" name="apply" value={name} className="size-5" /> Pritaikyti šį pakeitimą</label>
           </div>)}
           <SaveButton />

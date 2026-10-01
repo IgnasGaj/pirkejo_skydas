@@ -1,6 +1,6 @@
 import type { Candidate, ProductCandidate, ReceiptSuggestions } from "./types";
 
-const excludedSeller = /\b(?:PVM|VAT|LT\d{9,}|KASININK|KASA|TERMINAL|BANK|VISA|MASTERCARD|ADRES|GATV|TEL\.?|KORTEL|MOKĖJIM|ČEKIO|KVITO|WWW|HTTP)\b/i;
+const excludedSeller = /(?:^|[^\p{L}])(?:PVM|VAT|LT\d{9,}|ĮMONĖS\s+KOD\p{L}*|IMONES\s+KOD\p{L}*|KASININK\p{L}*|KASA|TERMINAL\p{L}*|BANK\p{L}*|VISA|MASTERCARD|ADRES\p{L}*|GATV\p{L}*|TEL\.?|KORTEL\p{L}*|MOKĖJIM\p{L}*|ČEKIO|KVITO|WWW|HTTP|ACQUIRER)(?:$|[^\p{L}])|(?:^|\s)(?:g\.|gatvė|pr\.|prospektas|al\.|alėja)\s*\d*|\b\d+\s*(?:g\.|gatvė|pr\.|prospektas|al\.|alėja)/iu;
 const excludedProduct = /PVM|VAT|IŠ VISO|VISO MOKĖTI|SUMA|TOTAL|SUBTOTAL|TARPINĖ|NUOLAID|GRĄŽA|GRYN|KORTEL|MOKĖTA|APMOKĖTA|SUTAUP|KAINA\/VNT|VNT KAINA|ČEK|KVIT|REFUND|GRĄŽINIM|KASA|TERMINAL/i;
 const datePattern = /\b(?:\d{4}[.-]\d{2}[.-]\d{2}|\d{2}[.-]\d{2}[.-]\d{4})\b/g;
 const amountPattern = /(?<![\w.,-])-?(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d{1,9})[,.]\d{2}(?![\d.,])/g;
@@ -55,8 +55,10 @@ export function parseReceiptText(text: string, asOfDate: string): ReceiptSuggest
   }
   let receiptTotal: Candidate<number> | null = null;
   const products: ProductCandidate[] = [];
-  const nonEuro = /\b(?:USD|GBP|PLN|RUB|\$|£|zł)\b/i.test(rawText);
+  const nonEuro = /\b(?:USD|GBP|PLN|RUB)\b|(?:^|[^\p{L}])zł(?:$|[^\p{L}])|[$£]/iu.test(rawText);
   if (nonEuro) warnings.push("Čekyje aptikta kita valiuta; EUR sumos nesiūlomos.");
+  const discount = lines.some((line) => /NUOLAID|SUTAUP|DISCOUNT/i.test(line));
+  if (discount) warnings.push("Čekyje yra nuolaida; galutinę pasirinktos prekės kainą įveskite patys.");
   const refund = /\b(?:GRĄŽINIMAS|REFUND|RETURN)\b/i.test(rawText);
   if (refund) warnings.push("Gali būti grąžinimo čekis; patikrinkite sumas.");
   for (const line of lines) {
@@ -70,7 +72,7 @@ export function parseReceiptText(text: string, asOfDate: string): ReceiptSuggest
     if (excludedProduct.test(line) || line === seller?.source || amounts.length === 0 || !/\p{L}/u.test(line) || /^\d{4}[.-]\d{2}/.test(line)) continue;
     const name = line.replace(amountPattern, "").replace(/\s{2,}/g, " ").trim();
     if (name.length < 3 || name.length > 120 || products.length >= 20) continue;
-    const ambiguous = /(?:\b\d+\s*(?:VNT|X|KG)\b|NUOLAID|[-−]\s*\d)/i.test(line) || amounts.length !== 1 || refund || nonEuro;
+    const ambiguous = /(?:\b\d+\s*(?:VNT|X|KG)\b|NUOLAID|[-−]\s*\d)/i.test(line) || amounts.length !== 1 || refund || nonEuro || discount;
     products.push({ name, amountCents: ambiguous ? null : parseEuroCents(amounts[0][0]), source: line,
       warning: ambiguous ? "Kiekis, nuolaida arba suma neaiški; kainą patikrinkite patys." : undefined });
   }

@@ -23,6 +23,74 @@ async function login(page: Page, user: User) {
   await expect(page).toHaveURL(/\/purchases(?:\?|$)/);
 }
 
+test("database claim serializes overlapping receipt saves and preserves bytes", async () => {
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  const options = { auth: { persistSession: false, autoRefreshToken: false } };
+  const a = createClient<Database>(credentials.url, credentials.key, options);
+  const retry = createClient<Database>(credentials.url, credentials.key, options);
+  expect((await a.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  expect((await retry.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const purchaseId = randomUUID();
+  const documentId = randomUUID();
+  const tokenA = randomUUID();
+  const tokenB = randomUUID();
+  const buffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9w3ZkAAAAASUVORK5CYII=", "base64");
+  const sha256 = createHash("sha256").update(buffer).digest("hex");
+  const path = `${credentials.a.id}/${purchaseId}/${documentId}.png`;
+  const args = { p_purchase_id: purchaseId, p_document_id: documentId, p_path: path,
+    p_filename: "race.png", p_mime: "image/png", p_size: buffer.length, p_sha256: sha256 };
+  try {
+    expect((await a.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id,
+      product_name: "Lygiagretus čekis", seller_name: "Bandymų parduotuvė", purchase_date: date,
+      purchase_channel: "UNKNOWN" })).error).toBeNull();
+    expect((await a.rpc("claim_reviewed_receipt", { ...args, p_token: tokenA })).data).toBe("CLAIMED");
+    expect((await retry.rpc("claim_reviewed_receipt", { ...args, p_token: tokenB })).data).toBe("PENDING");
+    expect((await a.storage.from("purchase-evidence").upload(path, buffer, { contentType: "image/png", upsert: false })).error).toBeNull();
+    expect((await retry.rpc("claim_reviewed_receipt", { ...args, p_token: tokenB })).data).toBe("PENDING");
+    const completed = await a.from("purchase_documents").update({ upload_state: "READY", upload_claim_token: null,
+      upload_claim_expires_at: null }).eq("id", documentId).eq("upload_claim_token", tokenA).select("id");
+    expect(completed.error).toBeNull(); expect(completed.data).toHaveLength(1);
+    expect((await retry.rpc("claim_reviewed_receipt", { ...args, p_token: tokenB })).data).toBe("READY");
+    const saved = await retry.storage.from("purchase-evidence").download(path);
+    expect(saved.error).toBeNull();
+    expect(createHash("sha256").update(Buffer.from(await saved.data!.arrayBuffer())).digest("hex")).toBe(sha256);
+    expect((await retry.from("purchase_documents").select("id,upload_state").eq("id", documentId)).data)
+      .toEqual([{ id: documentId, upload_state: "READY" }]);
+  } finally {
+    await a.storage.from("purchase-evidence").remove([path]);
+    await a.from("purchases").delete().eq("id", purchaseId);
+    await a.auth.signOut(); await retry.auth.signOut();
+  }
+});
+
+test("cancelling during real worker language preparation leaves manual entry usable", async ({ page }) => {
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  let requested!: () => void;
+  let release!: () => void;
+  const requestStarted = new Promise<void>((resolve) => { requested = resolve; });
+  const holdLanguage = new Promise<void>((resolve) => { release = resolve; });
+  await page.context().route("**/ocr/*.traineddata.gz", async (route) => {
+    requested();
+    await holdLanguage;
+    try { await route.continue(); } catch { /* The worker may already be terminated. */ }
+  });
+  await page.goto("/login");
+  await login(page, credentials.a);
+  await page.goto("/purchases/new");
+  await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9w3ZkAAAAASUVORK5CYII=", "base64");
+  await page.getByLabel("Pasirinkite čekį").setInputFiles({ name: "cancel.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "Nuskaityti", exact: true }).click();
+  try {
+    await Promise.race([requestStarted, new Promise((_, reject) => setTimeout(() => reject(new Error("Language request did not start")), 30_000))]);
+    await page.getByRole("button", { name: "Atšaukti" }).click();
+  } finally { release(); }
+  await expect(page.getByText("Nuskaitymas atšauktas.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Nuskaitytus duomenis patikrinkite prieš išsaugodami.")).toHaveCount(0);
+  await page.getByRole("button", { name: "Įvesti ranka" }).click();
+  await expect(page.getByLabel("Ką pirkote?")).toBeVisible();
+});
+
 test("scan assisted save and selected existing-receipt corrections", async ({ page, browser }) => {
   test.setTimeout(150_000);
   const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
@@ -123,6 +191,16 @@ test("scan assisted save and selected existing-receipt corrections", async ({ pa
     await client.storage.from("purchase-evidence").remove([largeDocument!.storage_path]);
     await client.from("purchase_documents").delete().eq("id", largeDocument!.id);
     largePath = "";
+    await page.reload();
+    await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
+    await page.getByRole("button", { name: "Nuskaityti", exact: true }).click();
+    await expect(page.getByLabel("Siūloma: Pardavėjas")).toBeVisible({ timeout: 90_000 });
+    await page.getByLabel("Siūloma: Pardavėjas").fill("Nebegaliojantis pasiūlymas");
+    await page.getByLabel("Pritaikyti šį pakeitimą").nth(1).check();
+    expect((await client.from("purchase_documents").delete().eq("id", savedDocument.id).select("id")).data).toHaveLength(1);
+    await page.getByRole("button", { name: "Pritaikyti pasirinktus pakeitimus" }).click();
+    await expect(page.getByText("Čekis nepasiekiamas.", { exact: false })).toBeVisible();
+    expect((await client.from("purchases").select("seller_name").eq("id", purchaseId).single()).data?.seller_name).toBe("Patikslinta parduotuvė");
   } finally {
     if (largePath) await client.storage.from("purchase-evidence").remove([largePath]);
     if (documentPath) await client.storage.from("purchase-evidence").remove([documentPath]);

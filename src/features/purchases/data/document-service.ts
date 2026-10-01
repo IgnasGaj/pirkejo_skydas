@@ -17,7 +17,7 @@ export async function removeDocument(client: SupabaseClient<Database>, userId: s
 }
 
 export async function removePurchaseAndEvidence(client: SupabaseClient<Database>, userId: string, purchaseId: string) {
-  const documents = await listPurchaseDocuments(client, userId, purchaseId);
+  const documents = await listPurchaseDocuments(client, userId, purchaseId, true);
   if (documents.length) {
     const { error } = await client.storage.from("purchase-evidence").remove(documents.map((document) => document.storage_path));
     if (error) throw error;
