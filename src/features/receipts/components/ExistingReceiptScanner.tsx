@@ -78,6 +78,7 @@ export function ExistingReceiptScanner({ purchase, document, action }: { purchas
                 setPriceOrigin(next.priceOrigin);
               } else setProposed((previous) => ({ ...previous, [name]: event.target.value }));
             }} className={fieldClass} /></label>
+            {name === "price" && priceOrigin === "manual" && <p className="mt-2 text-xs text-slate-600">Rankiniu būdu įvesta kaina išlieka pasirinkus kitą prekę. Patikrinkite ją.</p>}
             <label className="mt-3 flex min-h-11 items-center gap-3 text-sm font-semibold"><input type="checkbox" name="apply" value={name} className="size-5" /> Pritaikyti šį pakeitimą</label>
           </div>)}
           <SaveButton />

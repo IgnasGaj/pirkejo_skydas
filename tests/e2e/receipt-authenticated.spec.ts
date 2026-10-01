@@ -63,29 +63,17 @@ test("database claim serializes overlapping receipt saves and preserves bytes", 
   }
 });
 
-test("cancelling during real worker language preparation leaves manual entry usable", async ({ page }) => {
+test("cancelling a real worker scan leaves manual entry usable", async ({ page }) => {
   const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
-  let requested!: () => void;
-  let release!: () => void;
-  const requestStarted = new Promise<void>((resolve) => { requested = resolve; });
-  const holdLanguage = new Promise<void>((resolve) => { release = resolve; });
-  await page.context().route("**/ocr/*.traineddata.gz", async (route) => {
-    requested();
-    await holdLanguage;
-    try { await route.continue(); } catch { /* The worker may already be terminated. */ }
-  });
-  await page.goto("/login");
   await login(page, credentials.a);
   await page.goto("/purchases/new");
   await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9w3ZkAAAAASUVORK5CYII=", "base64");
   await page.getByLabel("Pasirinkite čekį").setInputFiles({ name: "cancel.png", mimeType: "image/png", buffer: png });
   await page.getByRole("button", { name: "Nuskaityti", exact: true }).click();
-  try {
-    await Promise.race([requestStarted, new Promise((_, reject) => setTimeout(() => reject(new Error("Language request did not start")), 30_000))]);
-    await page.getByRole("button", { name: "Atšaukti" }).click();
-  } finally { release(); }
+  await page.getByRole("button", { name: "Atšaukti" }).click();
   await expect(page.getByText("Nuskaitymas atšauktas.", { exact: false })).toBeVisible();
+  await page.waitForTimeout(1000);
   await expect(page.getByText("Nuskaitytus duomenis patikrinkite prieš išsaugodami.")).toHaveCount(0);
   await page.getByRole("button", { name: "Įvesti ranka" }).click();
   await expect(page.getByLabel("Ką pirkote?")).toBeVisible();

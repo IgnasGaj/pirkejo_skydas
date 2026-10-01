@@ -73,7 +73,7 @@ describe("deterministic receipt suggestions", () => {
     expect(result.products.every((product) => product.amountCents === null)).toBe(true);
     expect(result.warnings.join(" ")).toContain("nuolaida");
   });
-  it.each(["Vilniaus g. 12", "Kasininkas Jonas", "Įmonės kodas 123456789", "PVM kodas LT123456789", "Terminalas 12", "Bankas SEB", "Mokėjimo kortelė VISA"])("does not suggest %s as seller", (header) => {
+  it.each(["Vilniaus g. 12", "Kasininkas Jonas", "Įmonės kodas 123456789", "PVM kodas LT123456789", "Terminalas 12", "Bankas SEB", "Acquirer WORLDLINE", "Mokėjimo kortelė VISA"])("does not suggest %s as seller", (header) => {
     const result = parseReceiptText(`${header}\nUAB Žalias takas\nKava 3,50`, today);
     expect(result.seller?.value).toBe("UAB Žalias takas");
   });
