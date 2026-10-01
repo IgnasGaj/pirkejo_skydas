@@ -1,0 +1,24 @@
+import type { DefectiveStep } from "../domain/flow";
+import { rightToRepairCategories } from "../domain/rightToRepairCategories";
+
+export interface Question { title: string; hint?: string; options?: { value: string; label: string }[] }
+export const questions: Record<DefectiveStep, Question> = {
+  buyerType: { title: "Kas įsigijo prekę?", options: [{ value: "CONSUMER", label: "Aš kaip privatus asmuo" }, { value: "BUSINESS", label: "Įmonė / individuali veikla verslo tikslais" }] },
+  sellerType: { title: "Iš ko pirkote?", options: [{ value: "PROFESSIONAL", label: "Parduotuvės / įmonės" }, { value: "PRIVATE", label: "Privataus žmogaus" }, { value: "UNKNOWN", label: "Nežinau" }] },
+  transactionKind: { title: "Dėl ko kilo problema?", options: [{ value: "GOODS", label: "Fizinė prekė" }, { value: "DIGITAL_CONTENT_OR_SERVICE", label: "Skaitmeninis turinys / skaitmeninė paslauga" }, { value: "SERVICE", label: "Paslauga" }, { value: "UNKNOWN", label: "Nežinau" }] },
+  goodsConditionAtSale: { title: "Ar prekė buvo nauja ar naudota?", options: [{ value: "NEW", label: "Nauja" }, { value: "USED", label: "Naudota" }, { value: "UNKNOWN", label: "Nežinau" }] },
+  usedAgreement: { title: "Ar pirkimo metu aiškiai susitarėte dėl trumpesnio pardavėjo atsakomybės termino?", options: [{ value: "YES", label: "Taip" }, { value: "NO", label: "Ne" }, { value: "UNKNOWN", label: "Nežinau" }] },
+  usedMonths: { title: "Koks terminas buvo sutartas?", hint: "Įrašykite mėnesių skaičių. Trumpesnis nei 12 mėnesių terminas gali neatitikti teisės aktų." },
+  deliveredAt: { title: "Kada gavote prekę?", hint: "Nurodykite prekės perdavimo, o ne vien užsakymo datą." },
+  defectDetectedAt: { title: "Kada pirmą kartą pastebėjote trūkumą?", hint: "Tai padeda atskirti įstatyminės garantijos laikotarpį ir įrodinėjimo taisykles." },
+  apparentCause: { title: "Kaip atsirado problema?", options: [{ value: "NORMAL_USE_OR_UNKNOWN_DEFECT", label: "Prekė sugedo arba trūkumas atsirado įprastai naudojant" }, { value: "ACCIDENT_OR_EXTERNAL_DAMAGE", label: "Problema atsirado po smūgio, skysčio, kritimo ar kito įvykio" }, { value: "UNKNOWN", label: "Nežinau" }] },
+  purchaseEvidence: { title: "Ar turite įrodymą, kad pirkote iš šio pardavėjo?", options: [{ value: "RECEIPT", label: "Turiu čekį" }, { value: "INVOICE", label: "Turiu sąskaitą faktūrą" }, { value: "PAYMENT_RECORD", label: "Turiu mokėjimo kortele / banko įrašą" }, { value: "OTHER", label: "Turiu kitą pirkimą patvirtinantį dokumentą" }, { value: "NONE", label: "Nieko neturiu" }, { value: "UNKNOWN", label: "Nežinau" }] },
+  writtenSellerContact: { title: "Ar jau raštu kreipėtės į pardavėją dėl šio trūkumo?", options: [{ value: "YES", label: "Taip" }, { value: "NO", label: "Ne" }, { value: "UNCLEAR", label: "Nežinau / kreipiausi tik žodžiu" }] },
+  requestedRemedy: { title: "Ko prašėte arba norėtumėte prašyti pardavėjo?", options: [{ value: "REPAIR", label: "Sutaisyti prekę" }, { value: "REPLACEMENT", label: "Pakeisti prekę" }, { value: "PRICE_REDUCTION", label: "Sumažinti kainą" }, { value: "TERMINATION_REFUND", label: "Grąžinti pinigus" }, { value: "OTHER", label: "Kita" }, { value: "UNKNOWN", label: "Nežinau / aiškiai nenurodžiau" }] },
+  purchasedAt: { title: "Kada įsigijote prekę?", hint: "Tai svarbu tik vertinant nuo 2026 m. liepos 31 d. taikomą remonto pasirinkimo taisyklę." },
+  claimReceivedAt: { title: "Kada pardavėjas gavo jūsų rašytinį kreipimąsi?", hint: "Nurodykite gavimo datą, jei ją žinote. Ji gali skirtis nuo išsiuntimo datos." },
+  sellerOutcome: { title: "Kas įvyko po kreipimosi?", options: [{ value: "REPAIR_ACCEPTED", label: "Pardavėjas sutiko remontuoti" }, { value: "REPLACEMENT_ACCEPTED", label: "Pardavėjas sutiko pakeisti prekę" }, { value: "ALTERNATIVE_OFFERED", label: "Pardavėjas pasiūlė kitą sprendimą" }, { value: "REFUSED", label: "Pardavėjas atsisakė tenkinti mano reikalavimą" }, { value: "NO_RESPONSE", label: "Pardavėjas dar neatsakė" }, { value: "REPAIR_FAILED_OR_DEFECT_RECURRED", label: "Prekę remontavo, bet problema liko / pasikartojo" }, { value: "REPLACEMENT_DEFECTIVE", label: "Prekę pakeitė, bet problema atsirado ir pakeistoje prekėje" }, { value: "RESOLVED", label: "Problema išspręsta" }, { value: "OTHER_OR_UNKNOWN", label: "Kita / neaišku" }] },
+  alternativeAccepted: { title: "Ar pardavėjo pasiūlymas jus tenkina?", options: [{ value: "YES", label: "Taip" }, { value: "NO", label: "Ne" }, { value: "UNKNOWN", label: "Nežinau" }] },
+  hasCommercialGuarantee: { title: "Ar turite ilgesnę pardavėjo arba gamintojo suteiktą komercinę garantiją?", options: [{ value: "YES", label: "Taip" }, { value: "NO", label: "Ne" }, { value: "UNKNOWN", label: "Nežinau" }] },
+  rightToRepairCategory: { title: "Kokia tai prekė?", options: [...Object.entries(rightToRepairCategories).map(([value, label]) => ({ value, label })), { value: "OTHER", label: "Kita prekė" }, { value: "UNKNOWN", label: "Nežinau" }] }
+};

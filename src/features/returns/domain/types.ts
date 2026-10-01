@@ -53,7 +53,9 @@ export type DecisionCode =
 export type LegalSourceId =
   | "VVTAT_14_DAY_MYTHS" | "VVTAT_FAQ" | "VVTAT_PURCHASE_DOCUMENT"
   | "LT_RETAIL_RULES" | "LT_CIVIL_CODE" | "EU_CRD_WITHDRAWAL" | "EU_CRD_DIMINISHED_VALUE"
-  | "VVTAT_MOBILE_PHONE" | "EU_CN_SPORTS_BALL";
+  | "VVTAT_MOBILE_PHONE" | "EU_CN_SPORTS_BALL"
+  | "VVTAT_GUARANTEES" | "VVTAT_CLAIMS" | "VVTAT_RIGHT_TO_REPAIR"
+  | "EU_SALE_OF_GOODS" | "EU_RIGHT_TO_REPAIR" | "LT_CONSUMER_RIGHTS_ACT";
 
 export interface DecisionReason { text: string }
 export interface NextStep { text: string }

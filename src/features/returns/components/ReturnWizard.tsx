@@ -80,7 +80,6 @@ const questions: Record<Exclude<Step, "productSubtype">, { title: string; hint?:
 };
 
 function DecisionView({ decision, onBack, onRestart }: { decision: DecisionResult; onBack: () => void; onRestart: () => void }) {
-  const [showPlaceholder, setShowPlaceholder] = useState(false);
   const [showSteps, setShowSteps] = useState(false);
   return <div className="animate-in fade-in space-y-6">
     <button className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-teal-900" onClick={onBack}><ArrowLeft size={18} /> Grįžti</button>
@@ -89,7 +88,7 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DecisionResul
       <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-teal-700">Jūsų atsakymas</p>
       <h1 className="max-w-2xl text-3xl font-bold leading-tight tracking-tight text-slate-950 sm:text-4xl">{decision.title}</h1>
       <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">{decision.summary}</p>
-      {decision.code === "DEFECT_FLOW_REQUIRED" && <div className="mt-6"><Button onClick={() => setShowPlaceholder(true)}>Eiti į „Prekė sugedo“ <ArrowRight size={18} /></Button>{showPlaceholder && <p className="mt-3 text-sm text-slate-600">Ši funkcija bus sukurta kitame etape.</p>}</div>}
+      {decision.code === "DEFECT_FLOW_REQUIRED" && <div className="mt-6"><Button asChild><Link href="/defective-product">Tęsti sugedusios prekės patikrą <ArrowRight size={18} /></Link></Button></div>}
       {decision.nextSteps.length > 0 && decision.code === "PHYSICAL_RETURN_LIKELY_AVAILABLE" && <Button className="mt-6" onClick={() => { setShowSteps(true); document.getElementById("next-steps")?.scrollIntoView({ behavior: "smooth" }); }}>Ką daryti toliau? <ArrowRight size={18} /></Button>}
     </div>
     {decision.reasons.length > 0 && <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8"><h2 className="text-xl font-bold">Kodėl?</h2><ul className="mt-4 space-y-3">{decision.reasons.map(({ text }) => <li className="flex gap-3 text-sm leading-6 text-slate-700" key={text}><Check size={17} className="mt-1 shrink-0 text-teal-700" />{text}</li>)}</ul></section>}

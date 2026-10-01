@@ -1,0 +1,13 @@
+# Sprint 02 legal classification review
+
+The engine deliberately leaves these classifications open:
+
+| Unresolved classification | Conservative result | Official source to review before narrowing the rule |
+| --- | --- | --- |
+| Whether an uncertain contractual seller is a professional seller, especially on a marketplace | `SELLER_STATUS_REVIEW_REQUIRED` | [VVTAT consumer rights and guarantees](https://vvtat.lrv.lt/lt/veiklos-sritys-54/ne-maisto-produktai-55/vartotoju-teises-ir-garantijos-714/) and the transaction documents |
+| Whether a shorter liability period for used goods was expressly agreed, and its exact length | `USED_GOODS_TERM_REVIEW_REQUIRED` | [Directive (EU) 2019/771, Article 10(6)](https://eur-lex.europa.eu/eli/dir/2019/771/oj?eliuri=eli%3Adir%3A2019%3A771%3Aoj) and Civil Code Article 6.364 |
+| Whether damage following an external event is a seller-responsible lack of conformity | `CAUSE_REVIEW_REQUIRED` | [Directive (EU) 2019/771, Articles 10–11](https://eur-lex.europa.eu/eli/dir/2019/771/oj?eliuri=eli%3Adir%3A2019%3A771%3Aoj) and [VVTAT guarantees guidance](https://vvtat.lrv.lt/lt/veiklos-sritys-54/ne-maisto-produktai-55/vartotoju-teises-ir-garantijos-714/) |
+| Whether a defect is legally essential or minor in a specific case | `SELLER_REFUSAL_REVIEW_REQUIRED` and the minor-defect limitation accompanying `SECONDARY_REMEDIES_MAY_BE_AVAILABLE` | [Civil Code Article 6.364¹](https://e-seimas.lrs.lt/portal/legalAct/lt/TAD/TAIS.107687) and [VVTAT guarantees guidance](https://vvtat.lrv.lt/lt/veiklos-sritys-54/ne-maisto-produktai-55/vartotoju-teises-ir-garantijos-714/) |
+| Whether a particular repair or replacement period is reasonable and causes significant inconvenience | `REPAIR_DELAY_REVIEW_REQUIRED` | [Directive (EU) 2019/771, Article 14](https://eur-lex.europa.eu/eli/dir/2019/771/oj?eliuri=eli%3Adir%3A2019%3A771%3Aoj) and Civil Code Article 6.364² |
+| Whether the exact product model falls under a current repairability regulation and within its manufacturer repair period | `RIGHT_TO_REPAIR_REVIEW_REQUIRED` / `POST_GUARANTEE_REPAIR_RIGHT_MAY_APPLY` | [VVTAT right-to-repair category list](https://vvtat.lrv.lt/lt/teise-i-taisyma/) and [Directive (EU) 2024/1799, Annex II](https://eur-lex.europa.eu/eli/dir/2024/1799) |
+| Whether special sector rules change the general written-response deadline | `SELLER_REFUSAL_REVIEW_REQUIRED` when the receipt date or applicable period cannot be determined | [Consumer Rights Protection Law, Article 21](https://e-seimas.lrs.lt/portal/legalAct/lt/TAD/TAIS.6020) and [VVTAT claims guidance](https://vvtat.lrv.lt/lt/kaip-pateikti-prasyma/) |
