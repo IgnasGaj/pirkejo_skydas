@@ -54,7 +54,7 @@ export function PurchaseForm({ action, purchase, submitLabel, enableScanning = f
       price: priceTouched ? previous.price : product.amountCents === null ? "" : (product.amountCents / 100).toFixed(2) }));
   }
   function submit(form: FormData) {
-    if (mode === "scan" && file) { form.delete("receipt"); form.set("receipt", file); }
+    if (file) { form.delete("receipt"); form.set("receipt", file); }
     formAction(form);
   }
   const values = state.values;
@@ -64,11 +64,15 @@ export function PurchaseForm({ action, purchase, submitLabel, enableScanning = f
     {state.savedPurchaseId && <p className="rounded-xl bg-teal-50 p-4 text-sm text-teal-950">Pirkinys jau išsaugotas. <Link href={`/purchases/${state.savedPurchaseId}`} className="font-semibold underline">Atidaryti pirkinį</Link>. Galite dar kartą bandyti įkelti čekį. Pirkinio duomenis keiskite jo puslapyje.</p>}
     {enableScanning && <>
       <input type="hidden" name="draftId" value={draftIds?.purchase ?? ""} /><input type="hidden" name="documentId" value={draftIds?.document ?? ""} />
-      <input type="hidden" name="withReceipt" value={mode === "scan" && file ? "1" : "0"} />
+      <input type="hidden" name="withReceipt" value={file ? "1" : "0"} />
       <div className="flex flex-wrap gap-3" role="group" aria-label="Duomenų įvedimo būdas">
         <button type="button" onClick={() => setMode("scan")} aria-pressed={mode === "scan"} className="min-h-12 rounded-xl border border-teal-700 px-5 font-semibold text-teal-900">Nuskaityti čekį</button>
         <button type="button" onClick={() => setMode("manual")} aria-pressed={mode === "manual"} className="min-h-12 rounded-xl border border-teal-700 px-5 font-semibold text-teal-900">Įvesti ranka</button>
       </div>
+      {mode === "manual" && file && <div className="rounded-xl bg-teal-50 p-4 text-sm text-teal-950">
+        <p>Pasirinktas čekis „{file.name}“ bus išsaugotas kaip pirkimo įrodymas.</p>
+        <button type="button" onClick={() => { setFile(null); setSuggestions(null); if (chooserRef.current) chooserRef.current.value = ""; if (cameraRef.current) cameraRef.current.value = ""; }} className="mt-2 min-h-11 font-semibold underline focus-visible:ring-2 focus-visible:ring-teal-600">Pašalinti čekį</button>
+      </div>}
       {mode === "scan" && <div className="space-y-4 rounded-2xl bg-slate-50 p-4">
         <div className="flex flex-wrap gap-3">
           <label className="inline-flex min-h-12 cursor-pointer items-center rounded-xl border border-teal-700 bg-white px-4 text-sm font-semibold text-teal-900 focus-within:ring-2 focus-within:ring-teal-600">Pasirinkite čekį<input ref={chooserRef} name="receipt" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,.heic,.heif" onChange={(event) => { setFile(event.target.files?.[0] ?? null); setSuggestions(null); if (cameraRef.current) cameraRef.current.value = ""; }} className="sr-only" /></label>
@@ -92,6 +96,6 @@ export function PurchaseForm({ action, purchase, submitLabel, enableScanning = f
     <label className="block text-sm font-semibold">Užsakymo / čekio numeris<input name="referenceNumber" maxLength={200} value={enableScanning ? inputValues.referenceNumber : undefined} defaultValue={enableScanning ? undefined : values?.referenceNumber ?? purchase?.reference_number ?? ""} onChange={enableScanning ? (event) => setField("referenceNumber", event.target.value) : undefined} className={field} /></label>
     <label className="block text-sm font-semibold">Pastabos<textarea name="notes" rows={4} maxLength={2000} value={enableScanning ? inputValues.notes : undefined} defaultValue={enableScanning ? undefined : values?.notes ?? purchase?.notes ?? ""} onChange={enableScanning ? (event) => setField("notes", event.target.value) : undefined} placeholder="Pirkta su 3 metų komercine garantija." className={field} /></label>
     </fieldset>
-    {!(retryingReceipt && (mode !== "scan" || !file)) && <SubmitButton label={retryingReceipt ? "Pakartoti čekio įkėlimą" : enableScanning && mode === "scan" && file ? "Išsaugoti pirkinį ir čekį" : submitLabel} />}
+    {!(retryingReceipt && !file) && <SubmitButton label={retryingReceipt ? "Pakartoti čekio įkėlimą" : enableScanning && file ? "Išsaugoti pirkinį ir čekį" : submitLabel} />}
   </form>;
 }

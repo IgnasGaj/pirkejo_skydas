@@ -144,6 +144,8 @@ test("PDF scan fallback still saves private evidence with manual values", async 
     await page.getByLabel("Pasirinkite čekį").setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\nsynthetic test proof\n%%EOF") });
     await expect(page.getByText("Šį failą galite išsaugoti kaip pirkimo įrodymą.", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: "Nuskaityti", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Įvesti ranka" }).click();
+    await expect(page.getByText("Pasirinktas čekis", { exact: false })).toContainText("synthetic.pdf");
     await page.getByLabel("Ką pirkote?").fill(`Rankinis ${randomUUID()}`);
     await page.getByLabel("Pardavėjas").fill("Bandymų parduotuvė");
     await page.getByLabel("Kada pirkote?").fill(date);
