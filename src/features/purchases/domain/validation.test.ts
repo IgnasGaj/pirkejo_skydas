@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { documentMetadataSchema, parsePriceToCents, purchaseSchema, todayInVilnius, validateDocumentFile } from "./validation";
+import { documentMetadataSchema, parsePriceToCents, purchaseSchema, validateDocumentFile } from "./validation";
+import { todayInVilnius } from "@/lib/date";
 import { purchaseChannels } from "./types";
 import { resolvePurchaseContext } from "./context";
 import { uploadDocumentWithCleanup } from "./upload";

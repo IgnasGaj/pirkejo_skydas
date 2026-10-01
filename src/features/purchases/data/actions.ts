@@ -21,34 +21,45 @@ function purchaseInput(form: FormData) {
 function validId(id: string) { return z.uuid().safeParse(id).success; }
 function failure(path: string, kind: string): never { redirect(`${path}${path.includes("?") ? "&" : "?"}state=${kind}`); }
 
-export async function createPurchaseAction(form: FormData) {
+export type PurchaseFormState = { error: string | null; values?: Record<string, string>; attempt?: number };
+
+function failedForm(previous: PurchaseFormState, form: FormData, error: string): PurchaseFormState {
+  const fields = ["productName", "sellerName", "purchaseDate", "receivedDate", "purchaseChannel", "price", "referenceNumber", "notes"];
+  return {
+    error,
+    attempt: (previous.attempt ?? 0) + 1,
+    values: Object.fromEntries(fields.map((field) => [field, String(form.get(field) ?? "")]))
+  };
+}
+
+export async function createPurchaseAction(previous: PurchaseFormState, form: FormData): Promise<PurchaseFormState> {
   const user = await requirePurchaseUser("/purchases/new");
   const input = purchaseInput(form);
-  if (!input.success) failure("/purchases/new", "invalid");
+  if (!input.success) return failedForm(previous, form, "Patikrinkite įvestus duomenis ir bandykite dar kartą.");
   let purchase: Purchase;
   try {
     const client = await createClient();
     purchase = await createPurchase(client, user.id, input.data);
   } catch (error) {
     console.error("Purchase creation failed", error);
-    failure("/purchases/new", "save-error");
+    return failedForm(previous, form, "Nepavyko išsaugoti pirkinio. Bandykite dar kartą.");
   }
   revalidatePath("/purchases");
   redirect(`/purchases/${purchase.id}?state=created`);
 }
 
-export async function editPurchaseAction(id: string, form: FormData) {
+export async function editPurchaseAction(id: string, previous: PurchaseFormState, form: FormData): Promise<PurchaseFormState> {
   const user = await requirePurchaseUser(`/purchases/${id}/edit`);
   if (!validId(id)) failure("/purchases", "missing");
   const input = purchaseInput(form);
-  if (!input.success) failure(`/purchases/${id}/edit`, "invalid");
+  if (!input.success) return failedForm(previous, form, "Patikrinkite įvestus duomenis ir bandykite dar kartą.");
   let purchase: Purchase | null;
   try {
     const client = await createClient();
     purchase = await updatePurchase(client, user.id, id, input.data);
   } catch (error) {
     console.error("Purchase update failed", error);
-    failure(`/purchases/${id}/edit`, "save-error");
+    return failedForm(previous, form, "Nepavyko išsaugoti pirkinio. Bandykite dar kartą.");
   }
   if (!purchase) failure("/purchases", "missing");
   revalidatePath("/purchases");

@@ -8,6 +8,15 @@ import { safeReturnPath } from "@/features/purchases/data/auth";
 
 function destination(formData: FormData) { return safeReturnPath(String(formData.get("next") ?? "")); }
 function loginUrl(next: string, state: string) { return `/login?next=${encodeURIComponent(next)}&state=${state}`; }
+function logAuthError(operation: string, error: { name: string; message: string; code?: string; status?: number }) {
+  if (process.env.NODE_ENV !== "development") return;
+  console.error(`Supabase ${operation} error`, {
+    name: error.name,
+    message: error.message,
+    code: error.code,
+    status: error.status
+  });
+}
 
 export async function signIn(formData: FormData) {
   const next = destination(formData);
@@ -16,7 +25,10 @@ export async function signIn(formData: FormData) {
   if (!input.success) redirect(loginUrl(next, "invalid"));
   const client = await createClient();
   const { error } = await client.auth.signInWithPassword(input.data);
-  if (error) redirect(loginUrl(next, "signin-error"));
+  if (error) {
+    logAuthError("sign-in", error);
+    redirect(loginUrl(next, "signin-error"));
+  }
   redirect(next);
 }
 
@@ -33,7 +45,10 @@ export async function register(formData: FormData) {
     email: input.data.email, password: input.data.password,
     options: { emailRedirectTo: new URL("/auth/confirm", origin).toString() }
   });
-  if (error) redirect(loginUrl(next, "registration-error"));
+  if (error) {
+    logAuthError("sign-up", error);
+    redirect(loginUrl(next, "registration-error"));
+  }
   if (!data.session) redirect(loginUrl(next, "check-email"));
   redirect(next);
 }

@@ -9,16 +9,9 @@ import { evaluateReturnCase } from "../domain/evaluateReturnCase";
 import type { DecisionResult, ReturnCaseInput } from "../domain/types";
 import { legalSources } from "@/legal/sources";
 import type { Purchase } from "@/features/purchases/domain/types";
+import { todayInVilnius } from "@/lib/date";
 
 type Step = "defective" | "defectClarification" | "buyer" | "seller" | "purchaseChannel" | "purchaseDate" | "deliveryDate" | "productCategory" | "productSubtype" | "used" | "appearanceIntact" | "purchaseEvidence" | "customMade" | "perishable" | "sealedHygiene" | "sealOpened" | "otherDistanceException" | "handlingLevel";
-
-function localToday(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function nextStep(a: ReturnCaseInput): Step | null {
   if (!a.defective) return "defective";
@@ -102,7 +95,7 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DecisionResul
 }
 
 export function ReturnWizard({ purchase = null }: { purchase?: Pick<Purchase, "purchase_date" | "received_date" | "purchase_channel"> | null }) {
-  const [answers, setAnswers] = useState<ReturnCaseInput>(() => ({ asOfDate: localToday() }));
+  const [answers, setAnswers] = useState<ReturnCaseInput>(() => ({ asOfDate: todayInVilnius() }));
   const [history, setHistory] = useState<ReturnCaseInput[]>([]);
   const [dateDraft, setDateDraft] = useState("");
   const step = nextStep(answers);
@@ -125,7 +118,7 @@ export function ReturnWizard({ purchase = null }: { purchase?: Pick<Purchase, "p
     setHistory((items) => items.slice(0, -1));
     setDateDraft("");
   }
-  function restart() { setAnswers({ asOfDate: localToday() }); setHistory([]); setDateDraft(""); }
+  function restart() { setAnswers({ asOfDate: todayInVilnius() }); setHistory([]); setDateDraft(""); }
 
   if (decision) return <DecisionView decision={decision} onBack={back} onRestart={restart} />;
   if (!step) return null;

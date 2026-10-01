@@ -11,11 +11,8 @@ import { evaluateDefectiveProductCase } from "../domain/evaluateDefectiveProduct
 import { nextDefectiveStep, type DefectiveStep } from "../domain/flow";
 import type { DefectiveDecisionResult, DefectiveProductCaseInput, RequestedRemedy } from "../domain/types";
 import type { Purchase } from "@/features/purchases/domain/types";
+import { todayInVilnius } from "@/lib/date";
 
-function localToday(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
 function displayDate(date: string): string {
   const [year, month, day] = date.split("-");
   return `${year}-${month}-${day}`;
@@ -45,7 +42,7 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DefectiveDeci
 }
 
 export function DefectiveProductWizard({ purchase = null }: { purchase?: Pick<Purchase, "purchase_date" | "received_date" | "purchase_channel"> | null }) {
-  const [answers, setAnswers] = useState<DefectiveProductCaseInput>(() => ({ asOfDate: localToday() }));
+  const [answers, setAnswers] = useState<DefectiveProductCaseInput>(() => ({ asOfDate: todayInVilnius() }));
   const [history, setHistory] = useState<DefectiveProductCaseInput[]>([]);
   const [draft, setDraft] = useState("");
   const step = nextDefectiveStep(answers);
@@ -77,12 +74,11 @@ export function DefectiveProductWizard({ purchase = null }: { purchase?: Pick<Pu
     save(next);
   }
   function back() { const previous = history.at(-1); if (previous) { setAnswers(previous); setHistory((items) => items.slice(0, -1)); setDraft(""); } }
-  function restart() { setAnswers({ asOfDate: localToday() }); setHistory([]); setDraft(""); }
+  function restart() { setAnswers({ asOfDate: todayInVilnius() }); setHistory([]); setDraft(""); }
   if (decision) return <DecisionView decision={decision} onBack={back} onRestart={restart} />;
   if (!step) return null;
   const question = step === "requestedRemedy" && answers.writtenSellerContact === "YES" ? { ...questions[step], title: "Ko prašėte pardavėjo?" } : questions[step];
   const numeric = step === "usedMonths";
-  const date = ["deliveredAt", "defectDetectedAt", "purchasedAt", "claimReceivedAt"].includes(step);
   const unknownAllowed = ["usedMonths", "defectDetectedAt", "purchasedAt", "claimReceivedAt"].includes(step);
   const progress = Math.min(95, Math.round(history.length / 15 * 100));
   return <div className="mx-auto max-w-xl">

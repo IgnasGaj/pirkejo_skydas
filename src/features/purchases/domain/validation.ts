@@ -1,11 +1,6 @@
 import { z } from "zod";
+import { todayInVilnius } from "@/lib/date";
 import { documentTypes, purchaseChannels } from "./types";
-
-export function todayInVilnius() {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Vilnius", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const part = (type: string) => parts.find((item) => item.type === type)?.value;
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
 
 export function parsePriceToCents(value: string): number | null {
   const trimmed = value.trim();

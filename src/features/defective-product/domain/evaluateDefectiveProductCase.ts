@@ -2,7 +2,7 @@ import type { LegalSourceId } from "@/features/returns/domain/types";
 import { addCalendarMonths, parseCalendarDate, sellerResponseDeadline, sellerResponseOverdue, validSequence } from "./dateRules";
 import { isListedRepairCategory } from "./rightToRepairCategories";
 import { defectiveProductCaseSchema } from "./schemas";
-import type { DefectTimingClass, DefectiveDecisionResult, DefectiveProductCaseInput, DefectiveProductDecisionCode, RepairGuaranteeExtension, SecondaryRemedyGround } from "./types";
+import type { DefectTimingClass, DefectiveDecisionResult, DefectiveProductCaseInput, DefectiveProductDecisionCode, RepairGuaranteeExtension } from "./types";
 
 export const REPAIR_EXTENSION_EFFECTIVE_DATE = "2026-07-31";
 const defaultEvidence = ["PURCHASE", "DEFECT", "CORRESPONDENCE"];
