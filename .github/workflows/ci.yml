@@ -35,5 +35,6 @@ jobs:
         run: node scripts/prepare-local-e2e.mjs >> "$GITHUB_ENV"
       - run: npm run build
       - run: npm run test:e2e:auth
+      - run: node scripts/check-dev-purchase-forms.mjs
       - if: always()
         run: npx supabase stop --no-backup

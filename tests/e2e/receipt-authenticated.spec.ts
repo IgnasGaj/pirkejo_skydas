@@ -70,8 +70,18 @@ test("cancelling a real worker scan leaves manual entry usable", async ({ page }
   await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9w3ZkAAAAASUVORK5CYII=", "base64");
   await page.getByLabel("Pasirinkite čekį").setInputFiles({ name: "cancel.png", mimeType: "image/png", buffer: png });
-  await page.getByRole("button", { name: "Nuskaityti", exact: true }).click();
-  await page.getByRole("button", { name: "Atšaukti" }).click();
+  const cancelled = await page.evaluate(async () => {
+    const button = (name: string) => [...document.querySelectorAll("button")].find((entry) => entry.textContent?.trim() === name);
+    button("Nuskaityti")?.click();
+    const deadline = performance.now() + 5000;
+    while (performance.now() < deadline) {
+      const cancel = button("Atšaukti");
+      if (cancel) { cancel.click(); return true; }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return false;
+  });
+  expect(cancelled).toBe(true);
   await expect(page.getByText("Nuskaitymas atšauktas.", { exact: false })).toBeVisible();
   await page.waitForTimeout(1000);
   await expect(page.getByText("Nuskaitytus duomenis patikrinkite prieš išsaugodami.")).toHaveCount(0);
@@ -228,7 +238,7 @@ test("PDF scan fallback still saves private evidence with manual values", async 
   }
 });
 
-test("reload after partial save retries evidence on the same purchase", async ({ page }) => {
+test("an actual upload conflict gives partial success and retries on the same purchase", async ({ page }) => {
   const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
   const client = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
   expect((await client.auth.signInWithPassword(credentials.a)).error).toBeNull();
@@ -240,6 +250,7 @@ test("reload after partial save retries evidence on the same purchase", async ({
     await expect(page).toHaveURL(/draft=[0-9a-f-]{36}&document=[0-9a-f-]{36}/);
     const draftUrl = page.url();
     purchaseId = new URL(draftUrl).searchParams.get("draft")!;
+    const documentId = new URL(draftUrl).searchParams.get("document")!;
     const created = await client.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id,
       product_name: "Išsaugotas bandymas", seller_name: "Bandymų parduotuvė", purchase_date: date, purchase_channel: "UNKNOWN" });
     expect(created.error).toBeNull();
@@ -247,6 +258,16 @@ test("reload after partial save retries evidence on the same purchase", async ({
     await expect(page.getByRole("link", { name: "Atidaryti pirkinį" })).toHaveAttribute("href", `/purchases/${purchaseId}`);
     await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9w3ZkAAAAASUVORK5CYII=", "base64");
+    path = `${credentials.a.id}/${purchaseId}/${documentId}.png`;
+    expect((await client.storage.from("purchase-evidence").upload(path, Buffer.from("conflicting object"),
+      { contentType: "image/png", upsert: false })).error).toBeNull();
+    await page.getByLabel("Pasirinkite čekį").setInputFiles({ name: "retry.png", mimeType: "image/png", buffer: png });
+    await page.getByRole("button", { name: "Pakartoti čekio įkėlimą" }).click();
+    await expect(page.getByText("Pirkinys išsaugotas, tačiau čekio įkelti nepavyko.")).toBeVisible();
+    expect((await client.from("purchase_documents").select("upload_state").eq("id", documentId).single()).data?.upload_state).toBe("PENDING");
+    expect((await client.storage.from("purchase-evidence").remove([path])).error).toBeNull();
+    await page.goto(draftUrl);
+    await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
     await page.getByLabel("Pasirinkite čekį").setInputFiles({ name: "retry.png", mimeType: "image/png", buffer: png });
     await page.getByRole("button", { name: "Pakartoti čekio įkėlimą" }).click();
     await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}\\?state=created$`));
@@ -254,7 +275,11 @@ test("reload after partial save retries evidence on the same purchase", async ({
     expect(purchases).toHaveLength(1);
     const { data: documents } = await client.from("purchase_documents").select("id,storage_path").eq("purchase_id", purchaseId);
     expect(documents).toHaveLength(1);
-    path = documents![0].storage_path;
+    expect(documents![0].storage_path).toBe(path);
+    const saved = await client.storage.from("purchase-evidence").download(path);
+    expect(saved.error).toBeNull();
+    expect(createHash("sha256").update(Buffer.from(await saved.data!.arrayBuffer())).digest("hex"))
+      .toBe(createHash("sha256").update(png).digest("hex"));
     await page.goto(draftUrl);
     await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}\\?state=created$`));
   } finally {
