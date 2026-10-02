@@ -14,13 +14,13 @@ const date = (() => {
   return `${part("year")}-${part("month")}-${part("day")}`;
 })();
 
-async function login(page: Page, user: User) {
-  await page.goto("/login");
+async function login(page: Page, user: User, navigate = true) {
+  if (navigate) await page.goto("/login");
   const form = page.getByRole("heading", { name: "Prisijungti" }).locator("..");
   await form.getByLabel("El. paštas").fill(user.email);
   await form.getByLabel("Slaptažodis").fill(user.password);
   await form.getByRole("button", { name: "Prisijungti" }).click();
-  await expect(page).toHaveURL(/\/purchases(?:\?|$)/);
+  if (navigate) await expect(page).toHaveURL(/\/purchases(?:\?|$)/);
 }
 
 test("database claim serializes overlapping receipt saves and preserves bytes", async () => {
@@ -266,7 +266,13 @@ test("an actual upload conflict gives partial success and retries on the same pu
     await expect(page.getByText("Pirkinys išsaugotas, tačiau čekio įkelti nepavyko.")).toBeVisible();
     expect((await client.from("purchase_documents").select("upload_state").eq("id", documentId).single()).data?.upload_state).toBe("PENDING");
     expect((await client.storage.from("purchase-evidence").remove([path])).error).toBeNull();
-    await page.goto(draftUrl);
+    await page.context().clearCookies();
+    await page.getByRole("button", { name: "Pakartoti čekio įkėlimą" }).click();
+    await expect(page).toHaveURL(/\/login\?next=/);
+    expect(new URL(page.url()).searchParams.get("next")).toBe(`/purchases/new?draft=${purchaseId}&document=${documentId}`);
+    await login(page, credentials.a, false);
+    await expect(page).toHaveURL(draftUrl);
+    await expect(page.getByText("pasirinkite originalų čekio failą iš naujo", { exact: false })).toBeVisible();
     await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
     await page.getByLabel("Pasirinkite čekį").setInputFiles({ name: "retry.png", mimeType: "image/png", buffer: png });
     await page.getByRole("button", { name: "Pakartoti čekio įkėlimą" }).click();

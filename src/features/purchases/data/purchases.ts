@@ -43,12 +43,6 @@ export async function updatePurchaseIfCurrent(client: Client, userId: string, id
   return data;
 }
 
-export async function updatePurchase(client: Client, userId: string, id: string, input: PurchaseInput): Promise<Purchase | null> {
-  const { data, error } = await client.from("purchases").update(fields(input)).eq("user_id", userId).eq("id", id).select("*").maybeSingle();
-  if (error) throw error;
-  return data;
-}
-
 export async function deletePurchaseRow(client: Client, userId: string, id: string) {
   const { data, error } = await client.from("purchases").delete().eq("user_id", userId).eq("id", id).select("id").maybeSingle();
   if (error) throw error;

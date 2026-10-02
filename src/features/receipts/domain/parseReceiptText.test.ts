@@ -60,6 +60,21 @@ describe("deterministic receipt suggestions", () => {
     expect(result.receiptTotal).toBeNull();
     expect(result.warnings).toContain("Čekyje aptikta kita valiuta; EUR sumos nesiūlomos.");
   });
+  it.each(["CHF", "SEK", "NOK", "CAD"])("suppresses prices and totals for standalone %s", (code) => {
+    for (const receipt of [`SHOP\n${code}\n2026-10-01\nCoffee 5.00\nTOTAL 5.00`, `SHOP\nCoffee 5.00\n${code}\nTOTAL 5.00`]) {
+      const result = parseReceiptText(receipt, today);
+      expect(result.products[0]?.amountCents).toBeNull();
+      expect(result.receiptTotal).toBeNull();
+      expect(result.rawText).toBe(receipt);
+    }
+  });
+  it("keeps ordinary words and EUR controls usable", () => {
+    for (const receipt of ["SHOP\nEUR\nCoffee 5.00\nTOTAL 5.00", "SHOP\nNOKIA case 5.00\nCADBURY bar 2.00\nSEKUNDĖ 1.00\nTOTAL 8.00"]) {
+      const result = parseReceiptText(receipt, today);
+      expect(result.products.every((product) => product.amountCents !== null)).toBe(true);
+      expect(result.receiptTotal).not.toBeNull();
+    }
+  });
   it("suppresses every amount on mixed EUR and non-EUR receipts", () => {
     const result = parseReceiptText("Parduotuvė\nKava 2,50 EUR\nArbata 3,00 CHF\nTOTAL 5,50 €", today);
     expect(result.products).toHaveLength(2);

@@ -44,7 +44,7 @@ describe("defective product engine", () => {
   it("keeps the seller response period running until the deadline has passed", () => {
     const result = evaluate(claim);
     expect(result.code).toBe("SELLER_RESPONSE_PERIOD_RUNNING");
-    expect(result.responseDeadline).toBe("2026-10-04");
+    expect(result.responseDeadline).toBe("2026-10-05");
     expect(result.infoBlockIds).toContain("RESPONSE_NOT_REPAIR_DEADLINE");
   });
   it("recognizes an overdue response and provides the escalation path", () => {
@@ -56,6 +56,11 @@ describe("defective product engine", () => {
     expect(sellerResponseDeadline("2026-09-17")).toBe("2026-10-01");
     expect(sellerResponseOverdue("2026-09-17", "2026-10-01")).toBe(false);
     expect(sellerResponseOverdue("2026-09-17", "2026-10-02")).toBe(true);
+  });
+  it("extends seller response through a holiday and following weekend", () => {
+    expect(sellerResponseDeadline("2026-06-22")).toBe("2026-07-07");
+    expect(sellerResponseOverdue("2026-06-22", "2026-07-07")).toBe(false);
+    expect(sellerResponseOverdue("2026-06-22", "2026-07-08")).toBe(true);
   });
   it("treats refusal of repair as a possible secondary-remedy ground, not automatic illegality", () => {
     const result = evaluate({ ...claim, sellerOutcome: "REFUSED" });

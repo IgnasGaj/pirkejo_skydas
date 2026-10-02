@@ -202,3 +202,46 @@ test("two-account RLS and authenticated purchase lifecycle", async ({ page, brow
     await b.auth.signOut();
   }
 });
+
+test("stale purchase edit keeps newer seller, date, and price", async ({ page, context }) => {
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  const client = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  expect((await client.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const purchaseId = randomUUID();
+  const originalDate = localDate(4);
+  const newerDate = localDate(3);
+  try {
+    expect((await client.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id,
+      product_name: "Dviejų langų pirkinys", seller_name: "Senas pardavėjas", purchase_date: originalDate,
+      purchase_channel: "PHYSICAL_STORE", price_cents: 1000 })).error).toBeNull();
+    await page.goto("/login");
+    await login(page, credentials.a);
+    await expect(page).toHaveURL(/\/purchases(?:\?|$)/);
+    const editUrl = `/purchases/${purchaseId}/edit`;
+    await page.goto(editUrl);
+    const staleTab = await context.newPage();
+    try {
+      await staleTab.goto(editUrl);
+      await page.getByLabel("Pardavėjas").fill("Naujas pardavėjas");
+      await page.getByLabel("Kada pirkote?").fill(newerDate);
+      await page.getByLabel("Kaina").fill("25,50");
+      await page.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
+      await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}\\?state=updated$`));
+      await staleTab.getByLabel("Pastabos").fill("Mano pastaba");
+      await staleTab.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
+      await expect(staleTab.getByText("Pirkinys buvo pakeistas kitur", { exact: false })).toBeVisible();
+      await expect(staleTab.getByLabel("Pastabos")).toHaveValue("Mano pastaba");
+      const staleResult = await client.from("purchases").select("seller_name,purchase_date,price_cents,notes").eq("id", purchaseId).single();
+      expect(staleResult.data).toMatchObject({ seller_name: "Naujas pardavėjas", purchase_date: newerDate, price_cents: 2550, notes: null });
+      await staleTab.reload();
+      await staleTab.getByLabel("Pastabos").fill("Mano pastaba");
+      await staleTab.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
+      await expect(staleTab).toHaveURL(new RegExp(`/purchases/${purchaseId}\\?state=updated$`));
+      expect((await client.from("purchases").select("seller_name,purchase_date,price_cents,notes").eq("id", purchaseId).single()).data)
+        .toMatchObject({ seller_name: "Naujas pardavėjas", purchase_date: newerDate, price_cents: 2550, notes: "Mano pastaba" });
+    } finally { await staleTab.close(); }
+  } finally {
+    await client.from("purchases").delete().eq("id", purchaseId);
+    await client.auth.signOut();
+  }
+});
