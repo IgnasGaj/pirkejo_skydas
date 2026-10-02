@@ -1,4 +1,5 @@
 import type { Candidate, ProductCandidate, ReceiptSuggestions } from "./types";
+import { hasNonEuroCurrencyMarker } from "./currencyMarkers";
 
 const excludedSeller = /(?:^|[^\p{L}])(?:PVM|VAT|LT\d{9,}|ĮMONĖS\s+KOD\p{L}*|IMONES\s+KOD\p{L}*|KASININK\p{L}*|KASA|TERMINAL\p{L}*|BANK\p{L}*|VISA|MASTERCARD|ADRES\p{L}*|GATV\p{L}*|TEL\.?|KORTEL\p{L}*|MOKĖJIM\p{L}*|ČEKIO|KVITO|WWW|HTTP|ACQUIRER)(?:$|[^\p{L}])|(?:^|\s)(?:g\.|gatvė|pr\.|prospektas|al\.|alėja)\s*\d*|\b\d+\s*(?:g\.|gatvė|pr\.|prospektas|al\.|alėja)/iu;
 const excludedProduct = /PVM|VAT|IŠ VISO|VISO MOKĖTI|SUMA|TOTAL|SUBTOTAL|TARPINĖ|NUOLAID|GRĄŽA|GRYN|KORTEL|MOKĖTA|APMOKĖTA|SUTAUP|KAINA\/VNT|VNT KAINA|ČEK|KVIT|REFUND|GRĄŽINIM|KASA|TERMINAL/i;
@@ -55,7 +56,7 @@ export function parseReceiptText(text: string, asOfDate: string): ReceiptSuggest
   }
   let receiptTotal: Candidate<number> | null = null;
   const products: ProductCandidate[] = [];
-  const nonEuro = /\b(?:USD|GBP|PLN|RUB)\b|(?:^|[^\p{L}])zł(?:$|[^\p{L}])|[$£]/iu.test(rawText);
+  const nonEuro = hasNonEuroCurrencyMarker(rawText);
   if (nonEuro) warnings.push("Čekyje aptikta kita valiuta; EUR sumos nesiūlomos.");
   const discount = lines.some((line) => /NUOLAID|SUTAUP|DISCOUNT/i.test(line));
   if (discount) warnings.push("Čekyje yra nuolaida; galutinę pasirinktos prekės kainą įveskite patys.");

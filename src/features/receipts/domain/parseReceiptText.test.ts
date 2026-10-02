@@ -53,6 +53,38 @@ describe("deterministic receipt suggestions", () => {
     const refund = parseReceiptText("Parduotuvė\nGRĄŽINIMAS\nKava -2,50", today);
     expect(refund.products.every((p) => p.amountCents === null)).toBe(true);
   });
+  it.each(["CHF", "SEK", "NOK", "CAD"])("suppresses %s money while preserving the product", (code) => {
+    const result = parseReceiptText(`SHOP\nCoffee 5.00 ${code}\nTOTAL 5.00 ${code}`, today);
+    expect(result.products[0]?.name).toContain("Coffee");
+    expect(result.products[0]?.amountCents).toBeNull();
+    expect(result.receiptTotal).toBeNull();
+    expect(result.warnings).toContain("Čekyje aptikta kita valiuta; EUR sumos nesiūlomos.");
+  });
+  it("suppresses every amount on mixed EUR and non-EUR receipts", () => {
+    const result = parseReceiptText("Parduotuvė\nKava 2,50 EUR\nArbata 3,00 CHF\nTOTAL 5,50 €", today);
+    expect(result.products).toHaveLength(2);
+    expect(result.products.every((product) => product.amountCents === null)).toBe(true);
+    expect(result.receiptTotal).toBeNull();
+  });
+  it("keeps EUR, euro-symbol and unmarked Lithuanian amounts usable", () => {
+    for (const total of ["IŠ VISO 3,50 EUR", "IŠ VISO 3,50 €", "IŠ VISO 3,50"]) {
+      const result = parseReceiptText(`UAB Žalias takas\nArbata 3,50\n${total}`, today);
+      expect(result.products[0]?.amountCents).toBe(350);
+      expect(result.receiptTotal?.value).toBe(350);
+      expect(result.warnings).not.toContain("Čekyje aptikta kita valiuta; EUR sumos nesiūlomos.");
+    }
+  });
+  it("does not mistake currency-code substrings or common headers for money markers", () => {
+    const result = parseReceiptText("Parduotuvė\nCADBURY šokoladas 5,00\nNOKIA dėklas 4,00\nPVM 1,56\nKASA 1\nIŠ VISO 9,00", today);
+    expect(result.products.map((product) => product.amountCents)).toEqual([500, 400]);
+    expect(result.receiptTotal?.value).toBe(900);
+  });
+  it("treats unresolved amount suffix as unsafe currency evidence", () => {
+    const result = parseReceiptText("SHOP\nCoffee 5.00 XYZ\nTOTAL 5.00 XYZ", today);
+    expect(result.products[0]?.amountCents).toBeNull();
+    expect(result.receiptTotal).toBeNull();
+    expect(result.warnings).toContain("Čekyje aptikta kita valiuta; EUR sumos nesiūlomos.");
+  });
   it.each(["$5.00", "5.00$", "£ 5.00", "5.00 £", "zł 5,00", "5,00 zł", "USD 5.00", "5.00 PLN"])("does not label %s as EUR", (amount) => {
     const result = parseReceiptText(`SHOP\nCoffee ${amount}\nTOTAL ${amount}`, today);
     expect(result.products[0]?.amountCents).toBeNull();
