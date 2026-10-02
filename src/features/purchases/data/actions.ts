@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requirePurchaseUser } from "./auth";
-import { createPurchase, getPurchaseById, getPurchaseDocument, updatePurchase } from "./purchases";
+import { createPurchase, getPurchaseById, getPurchaseDocument, updatePurchaseIfCurrent } from "./purchases";
 import { removeDocument, removePurchaseAndEvidence, saveDocument } from "./document-service";
 import { documentMetadataSchema, extensionForMime, purchaseSchema, validateDocumentFile, verifyFileSignature } from "../domain/validation";
 import type { Purchase, PurchaseDocument } from "../domain/types";
@@ -53,15 +53,17 @@ export async function editPurchaseAction(id: string, previous: PurchaseFormState
   if (!validId(id)) failure("/purchases", "missing");
   const input = purchaseInput(form);
   if (!input.success) return failedForm(previous, form, "Patikrinkite įvestus duomenis ir bandykite dar kartą.");
+  const updatedAt = String(form.get("updatedAt") ?? "");
+  if (!updatedAt) return failedForm(previous, form, "Pirkinys buvo pakeistas kitur. Atnaujinkite puslapį ir peržiūrėkite duomenis iš naujo.");
   let purchase: Purchase | null;
   try {
     const client = await createClient();
-    purchase = await updatePurchase(client, user.id, id, input.data);
+    purchase = await updatePurchaseIfCurrent(client, user.id, id, updatedAt, input.data);
   } catch (error) {
     console.error("Purchase update failed", error);
     return failedForm(previous, form, "Nepavyko išsaugoti pirkinio. Bandykite dar kartą.");
   }
-  if (!purchase) failure("/purchases", "missing");
+  if (!purchase) return failedForm(previous, form, "Pirkinys buvo pakeistas kitur. Atnaujinkite puslapį ir peržiūrėkite duomenis iš naujo.");
   revalidatePath("/purchases");
   revalidatePath(`/purchases/${id}`);
   redirect(`/purchases/${id}?state=updated`);

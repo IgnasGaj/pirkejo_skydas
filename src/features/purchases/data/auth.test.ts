@@ -11,5 +11,7 @@ it("preserves only valid receipt draft IDs across login", () => {
   const document = crypto.randomUUID();
   expect(safeReturnPath(`/purchases/new?draft=${draft}&document=${document}`)).toBe(`/purchases/new?draft=${draft}&document=${document}`);
   expect(safeReturnPath(`/purchases/new?draft=${draft}&document=${document}&next=//evil.example`)).toBe("/purchases/new");
+  expect(safeReturnPath(`/purchases/new?draft=//evil.example&document=${document}`)).toBe("/purchases/new");
+  expect(safeReturnPath(`/purchases/new?draft=${draft}&document=../login`)).toBe("/purchases/new");
   expect(safeReturnPath("//evil.example/purchases/new")).toBe("/purchases");
 });

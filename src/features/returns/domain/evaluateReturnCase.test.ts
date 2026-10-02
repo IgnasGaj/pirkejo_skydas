@@ -27,9 +27,28 @@ describe("date rules", () => {
     expect(evaluateFourteenDayPeriod("2026-02-30", "2026-03-14")).toBe("INVALID_DATE");
     expect(evaluateFourteenDayPeriod("2026-10-01", "2026-09-30")).toBe("INVALID_DATE");
   });
+  it.each([
+    ["Saturday", "2026-09-19", "2026-10-05", "2026-10-06"],
+    ["Sunday", "2026-09-20", "2026-10-05", "2026-10-06"],
+    ["Lithuanian holiday", "2026-06-22", "2026-07-07", "2026-07-08"],
+    ["holiday followed by weekend", "2026-12-11", "2026-12-28", "2026-12-29"],
+    ["All Souls after Sunday", "2026-10-19", "2026-11-03", "2026-11-04"],
+    ["Easter Monday", "2026-03-23", "2026-04-07", "2026-04-08"]
+  ])("extends %s final day through the next working day", (_label, event, lastDay, followingDay) => {
+    expect(evaluateFourteenDayPeriod(event, lastDay)).toBe("WITHIN_14_DAYS");
+    expect(evaluateFourteenDayPeriod(event, followingDay)).toBe("EXPIRED");
+  });
 });
 
 describe("return decision engine", () => {
+  it("keeps distance withdrawal available on the adjusted final day", () => {
+    expect(evaluateReturnCase({ ...distance, deliveryDate: "2026-09-19", asOfDate: "2026-10-05" }).code).toBe("DISTANCE_WITHDRAWAL_LIKELY_AVAILABLE");
+    expect(evaluateReturnCase({ ...distance, deliveryDate: "2026-09-19", asOfDate: "2026-10-06" }).code).toBe("SPECIAL_REVIEW_REQUIRED");
+  });
+  it("uses the Lithuanian next-working-day rule for physical returns", () => {
+    expect(evaluateReturnCase({ ...physical, purchaseDate: "2026-06-22", asOfDate: "2026-07-07" }).code).toBe("PHYSICAL_RETURN_LIKELY_AVAILABLE");
+    expect(evaluateReturnCase({ ...physical, purchaseDate: "2026-06-22", asOfDate: "2026-07-08" }).code).toBe("PHYSICAL_RETURN_PERIOD_EXPIRED");
+  });
   it("finds likely eligibility for a standard physical-store item on day 5", () => {
     expect(evaluateReturnCase(physical).code).toBe("PHYSICAL_RETURN_LIKELY_AVAILABLE");
   });

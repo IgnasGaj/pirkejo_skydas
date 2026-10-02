@@ -60,8 +60,9 @@ export function PurchaseForm({ action, purchase, submitLabel, enableScanning = f
   const values = state.values;
   const retryingReceipt = enableScanning && Boolean(state.savedPurchaseId);
   return <form ref={formRef} key={enableScanning ? undefined : state.attempt ?? 0} action={enableScanning ? submit : formAction} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 sm:p-8">
+    {purchase && !enableScanning && <input type="hidden" name="updatedAt" value={purchase.updated_at} />}
     {state.error && <p role="alert" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950">{state.error}</p>}
-    {state.savedPurchaseId && <p className="rounded-xl bg-teal-50 p-4 text-sm text-teal-950">Pirkinys jau išsaugotas. <Link href={`/purchases/${state.savedPurchaseId}`} className="font-semibold underline">Atidaryti pirkinį</Link>. Galite dar kartą bandyti įkelti čekį. Pirkinio duomenis keiskite jo puslapyje.</p>}
+    {state.savedPurchaseId && <p className="rounded-xl bg-teal-50 p-4 text-sm text-teal-950">Pirkinys jau išsaugotas. <Link href={`/purchases/${state.savedPurchaseId}`} className="font-semibold underline">Atidaryti pirkinį</Link>. Galite dar kartą bandyti įkelti čekį. Po pakartotinio prisijungimo pasirinkite originalų čekio failą iš naujo. Pirkinio duomenis keiskite jo puslapyje.</p>}
     {enableScanning && <>
       <input type="hidden" name="draftId" value={draftIds?.purchase ?? ""} /><input type="hidden" name="documentId" value={draftIds?.document ?? ""} />
       <input type="hidden" name="withReceipt" value={file ? "1" : "0"} />

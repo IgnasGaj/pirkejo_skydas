@@ -21,10 +21,10 @@ function refresh(id: string) {
 }
 
 export async function saveReviewedPurchase(previous: PurchaseFormState, form: FormData): Promise<PurchaseFormState> {
-  const user = await requirePurchaseUser("/purchases/new");
   const id = String(form.get("draftId") ?? "");
   const documentId = String(form.get("documentId") ?? "");
   if (!z.uuid().safeParse(id).success || !z.uuid().safeParse(documentId).success) return errorState(form, "Atnaujinkite puslapį ir bandykite dar kartą.");
+  const user = await requirePurchaseUser(`/purchases/new?draft=${id}&document=${documentId}`);
   const wantsReceipt = form.get("withReceipt") === "1";
   const file = form.getAll("receipt").find((entry) => entry instanceof File && entry.size > 0);
   if (wantsReceipt && (!(file instanceof File) || file.size === 0)) {

@@ -35,7 +35,11 @@ function nearby(line: string, start: number, end: number, amounts: RegExpMatchAr
 /** True means that OCR must not offer any extracted amount as EUR. */
 export function hasNonEuroCurrencyMarker(text: string): boolean {
   const lines = text.slice(0, 20_000).split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 250);
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
+    const standaloneCode = line.match(/^[\[(:\s]*([A-Za-z]{3})[\]):.\s]*$/)?.[1]?.toUpperCase();
+    if (standaloneCode && nonEuroCodes.has(standaloneCode) &&
+      lines.slice(Math.max(0, index - 3), Math.min(lines.length, index + 4)).some((nearLine, offset) =>
+        offset + Math.max(0, index - 3) !== index && [...nearLine.matchAll(amount)].length > 0)) return true;
     if (symbols.test(line)) return true;
     const amounts = [...line.matchAll(amount)];
     for (const match of line.matchAll(word)) {

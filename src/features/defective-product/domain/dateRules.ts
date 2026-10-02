@@ -1,3 +1,5 @@
+import { lithuanianDeadline } from "@/lib/legalDeadline";
+
 /** Dates are calendar dates in YYYY-MM-DD, parsed in UTC to avoid local timezone shifts. */
 export function parseCalendarDate(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -24,8 +26,8 @@ export function addCalendarMonths(value: string, months: number): string | null 
 export function validSequence(earlier: string, later: string): boolean {
   return !!parseCalendarDate(earlier) && !!parseCalendarDate(later) && earlier <= later;
 }
-/** Receipt day is day 0; the following day is day 1. Day 14 is still in time. */
-export function sellerResponseDeadline(receivedAt: string): string | null { return addCalendarDays(receivedAt, 14); }
+/** Receipt day is day 0; the following day is day 1. The adjusted deadline is included. */
+export function sellerResponseDeadline(receivedAt: string): string | null { return lithuanianDeadline(receivedAt, 14); }
 export function sellerResponseOverdue(receivedAt: string, asOfDate: string): boolean | null {
   const deadline = sellerResponseDeadline(receivedAt);
   if (!deadline || !validSequence(receivedAt, asOfDate)) return null;

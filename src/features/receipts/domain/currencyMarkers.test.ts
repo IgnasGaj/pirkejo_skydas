@@ -16,7 +16,11 @@ describe("receipt currency markers", () => {
     expect(hasNonEuroCurrencyMarker("Coffee 5.00 XYZ")).toBe(true);
     expect(hasNonEuroCurrencyMarker(`${"\n".repeat(250)}Coffee 5.00 CHF`)).toBe(true);
   });
-  it.each(["Coffee 5.00 EUR", "€ 5,00", "PVM 0,43\nKAVA 5,00", "SEKUNDĖ 5,00", "NOKIA 5,00", "CADBURY 5,00", "CHF\nCoffee 5.00", "KASA 1\nTOTAL 5.00", "Coffee 5.00 VAT", "Coffee 5.00 VNT"])("does not flag %s", (line) => {
+  it.each(["Coffee 5.00 EUR", "€ 5,00", "PVM 0,43\nKAVA 5,00", "SEKUNDĖ 5,00", "NOKIA 5,00", "CADBURY 5,00", "KASA 1\nTOTAL 5.00", "Coffee 5.00 VAT", "Coffee 5.00 VNT"])("does not flag %s", (line) => {
     expect(hasNonEuroCurrencyMarker(line)).toBe(false);
+  });
+  it.each(["CHF", "SEK", "NOK", "CAD"])("recognizes standalone %s in a receipt", (code) => {
+    expect(hasNonEuroCurrencyMarker(`SHOP\n${code}\n2026-10-01\nCoffee 5.00\nTOTAL 5.00`)).toBe(true);
+    expect(hasNonEuroCurrencyMarker(`SHOP\nCoffee 5.00\n${code}\nTOTAL 5.00`)).toBe(true);
   });
 });
