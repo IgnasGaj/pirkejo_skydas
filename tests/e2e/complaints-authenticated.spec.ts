@@ -1,0 +1,258 @@
+import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
+import { expect, test, type Page } from "@playwright/test";
+import type { Database } from "../../src/lib/supabase/database.types";
+
+const enabled = process.env.E2E_AUTH_LOCAL === "1" && Boolean(process.env.E2E_AUTH_CREDENTIALS_FILE);
+test.skip(!enabled, "Requires disposable local Supabase and ordinary test accounts");
+type User = { id: string; email: string; password: string };
+type Credentials = { url: string; key: string; a: User; b: User };
+function localDate(daysAgo: number) {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Vilnius", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(Date.now() - daysAgo * 86_400_000));
+  const part = (name: string) => parts.find((item) => item.type === name)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+async function login(page: Page, user: User) {
+  await page.goto("/login");
+  const form = page.getByRole("heading", { name: "Prisijungti" }).locator("..");
+  await form.getByLabel("El. paštas").fill(user.email);
+  await form.getByLabel("Slaptažodis").fill(user.password);
+  await form.getByRole("button", { name: "Prisijungti" }).click();
+  await expect(page).toHaveURL(/\/purchases(?:\?|$)/);
+}
+
+test("private drafts, retry-safe generation, exports, ownership and stale facts on a disposable backend", async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  expect(credentials.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  const options = { auth: { persistSession: false, autoRefreshToken: false } };
+  const a = createClient<Database>(credentials.url, credentials.key, options);
+  const b = createClient<Database>(credentials.url, credentials.key, options);
+  const anon = createClient<Database>(credentials.url, credentials.key, options);
+  expect((await a.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  expect((await b.auth.signInWithPassword(credentials.b)).error).toBeNull();
+  const purchaseId = randomUUID();
+  let complaintId: string | undefined;
+  let evidencePath: string | undefined;
+  let bEvidencePath: string | undefined;
+  let bPurchaseId: string | undefined;
+  const purchaseDate = localDate(4);
+  const receivedDate = localDate(3);
+  const today = localDate(0);
+  try {
+    expect((await a.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id, product_name: "Bandomoji kėdė", seller_name: "Bandymų parduotuvė", purchase_date: purchaseDate, received_date: receivedDate, purchase_channel: "DISTANCE", price_cents: 4999 })).error).toBeNull();
+    await login(page, credentials.a);
+    const answers = { buyerType: "CONSUMER", sellerType: "PROFESSIONAL", transactionKind: "GOODS", goodsConditionAtSale: "NEW", purchasedAt: purchaseDate, deliveredAt: receivedDate, defectDetectedAt: localDate(2), apparentCause: "NORMAL_USE_OR_UNKNOWN_DEFECT", purchaseEvidence: "INVOICE", writtenSellerContact: "NO" };
+    const facts = { consumerName: "Jūratė Ąžuolaitė", consumerEmail: "jurate@example.test", sellerName: "Bandymų parduotuvė", sellerContact: "", productName: "Bandomoji kėdė", purchaseDate, receivedDate, purchaseChannel: "DISTANCE", referenceNumber: "UŽS-1", priceCents: 4999, documentDate: today, defectDescription: "Kėdės koja yra sulūžusi.", defectDiscoveredAt: localDate(2), reductionCents: null, reductionExplanation: "", physicalReason: null, confirmedNotMinor: false, alternativeProof: "Mokėjimo įrašas", evidenceIds: [] };
+    const api = `/api/purchases/${purchaseId}/complaints`;
+    const create = { operation: "save", requestId: randomUUID(), family: "DEFECTIVE_PRODUCT", answers, facts, remedy: "REPAIR" };
+    const first = await page.request.post(api, { data: create });
+    expect(first.status(), await first.text()).toBe(200);
+    const created = await first.json();
+    complaintId = created.id;
+    const retry = await page.request.post(api, { data: create });
+    expect((await retry.json()).id).toBe(complaintId);
+    expect((await a.from("complaints").select("id").eq("purchase_id", purchaseId)).data).toHaveLength(1);
+
+    expect((await b.from("complaints").select("id").eq("id", complaintId!)).data).toEqual([]);
+    expect((await anon.from("complaints").select("id").eq("id", complaintId!)).data).toEqual([]);
+    expect((await b.from("complaints").insert({ id: randomUUID(), user_id: credentials.b.id, purchase_id: purchaseId, family: "DEFECTIVE_PRODUCT", request_id: randomUUID(), answers: {}, facts: {}, remedy: "REPAIR", purchase_updated_at: new Date().toISOString(), template_version: "x", source_version: "x" })).error).not.toBeNull();
+    const generatedId = randomUUID();
+    const generate = { operation: "generate", complaintId, expectedVersion: created.draft_version, requestId: generatedId };
+    const responses = await Promise.all([page.request.post(api, { data: generate }), page.request.post(api, { data: generate })]);
+    expect(responses.map((response) => response.status())).toEqual([200, 200]);
+    const versionIds = await Promise.all(responses.map(async (response) => (await response.json()).id));
+    expect(new Set(versionIds).size).toBe(1);
+    const versionId = versionIds[0];
+    expect((await a.from("complaint_versions").select("id").eq("complaint_id", complaintId!)).data).toHaveLength(1);
+    expect((await b.from("complaint_versions").select("id").eq("id", versionId)).data).toEqual([]);
+    expect((await anon.from("complaint_versions").select("id").eq("id", versionId)).data).toEqual([]);
+    expect((await b.rpc("generate_signed_complaint_version", { p_payload: JSON.stringify({ complaintId }), p_signature: "forged" })).error).not.toBeNull();
+    expect((await a.rpc("generate_signed_complaint_version", { p_payload: JSON.stringify({ complaintId }), p_signature: "forged" })).error).not.toBeNull();
+    expect((await a.from("complaint_versions").insert({ user_id: credentials.a.id, purchase_id: purchaseId, complaint_id: complaintId!, request_id: randomUUID(), version_no: 2, document_date: today, snapshot: {}, sections: [], plain_text: "forged", template_version: "x", source_version: "x" })).error).not.toBeNull();
+    expect((await a.from("complaint_versions").update({ plain_text: "changed" } as never).eq("id", versionId).select("id")).data).toEqual([]);
+    const base = `/api/purchases/${purchaseId}/complaints/${complaintId}/versions/${versionId}`;
+    const txt = await page.request.get(`${base}?format=txt`);
+    expect(txt.status()).toBe(200);
+    expect(txt.headers()["content-type"]).toContain("text/plain");
+    expect(txt.headers()["cache-control"]).toContain("no-store");
+    expect(await txt.text()).toContain("Jūratė Ąžuolaitė");
+    const pdf = await page.request.get(`${base}?format=pdf`);
+    expect(pdf.status()).toBe(200);
+    expect(pdf.headers()["content-type"]).toContain("application/pdf");
+    expect(Buffer.from(await pdf.body()).subarray(0, 5).toString()).toBe("%PDF-");
+    await page.goto(`/purchases/${purchaseId}/complaints/${complaintId}`);
+    await expect(page.getByText("Versija 1", { exact: false })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Atsisiųsti PDF" })).toBeVisible();
+    await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("Unavailable"); } } }));
+    await page.getByRole("button", { name: "Kopijuoti tekstą" }).click();
+    await expect(page.getByText("Pažymėkite tekstą žemiau", { exact: false })).toBeVisible();
+    await page.getByText("Peržiūrėti dokumentą", { exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Versijos 1 tekstas" })).toHaveValue(/Jūratė Ąžuolaitė/);
+    await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => undefined } }));
+    await page.getByRole("button", { name: "Kopijuoti tekstą" }).click();
+    await expect(page.getByText("Tekstas nukopijuotas.")).toBeVisible();
+    const bContext = await browser.newContext();
+    const bPage = await bContext.newPage();
+    try {
+      await login(bPage, credentials.b);
+      expect((await bPage.request.get(base)).status()).toBe(404);
+      await bPage.goto(`/purchases/${purchaseId}/complaints/${complaintId}`);
+      await expect(bPage.getByText("Pirkinio rasti nepavyko.")).toBeVisible();
+    } finally { await bContext.close(); }
+    const anonymous = await browser.newContext();
+    try { expect((await anonymous.request.get(base)).status()).toBe(401); } finally { await anonymous.close(); }
+
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9w3ZkAAAAASUVORK5CYII=", "base64");
+    bPurchaseId = randomUUID();
+    expect((await b.from("purchases").insert({ id: bPurchaseId, user_id: credentials.b.id, product_name: "B pirkinys", seller_name: "B pardavėjas", purchase_date: purchaseDate, purchase_channel: "PHYSICAL_STORE" })).error).toBeNull();
+    bEvidencePath = `${credentials.b.id}/${bPurchaseId}/${randomUUID()}.png`;
+    expect((await b.storage.from("purchase-evidence").upload(bEvidencePath, png, { contentType: "image/png" })).error).toBeNull();
+    const bDocument = await b.from("purchase_documents").insert({ user_id: credentials.b.id, purchase_id: bPurchaseId, document_type: "RECEIPT", original_filename: "foreign.png", storage_path: bEvidencePath, mime_type: "image/png", size_bytes: png.length }).select("id").single();
+    expect(bDocument.error).toBeNull();
+    const foreignSave = await page.request.post(api, { data: { ...create, requestId: randomUUID(), facts: { ...facts, evidenceIds: [bDocument.data!.id] } } });
+    expect(foreignSave.status()).toBe(400);
+    evidencePath = `${credentials.a.id}/${purchaseId}/${randomUUID()}.png`;
+    expect((await a.storage.from("purchase-evidence").upload(evidencePath, png, { contentType: "image/png" })).error).toBeNull();
+    const document = await a.from("purchase_documents").insert({ user_id: credentials.a.id, purchase_id: purchaseId, document_type: "RECEIPT", original_filename: "proof.png", storage_path: evidencePath, mime_type: "image/png", size_bytes: png.length }).select("id").single();
+    expect(document.error).toBeNull();
+    const evidenceSave = await page.request.post(api, { data: { ...create, requestId: randomUUID(), facts: { ...facts, evidenceIds: [document.data!.id] } } });
+    expect(evidenceSave.status(), await evidenceSave.text()).toBe(200);
+    const evidenceDraft = await evidenceSave.json();
+    expect((await a.storage.from("purchase-evidence").remove([evidencePath])).error).toBeNull();
+    evidencePath = undefined;
+    const inaccessibleEvidenceGeneration = await page.request.post(api, { data: { operation: "generate", complaintId: evidenceDraft.id, expectedVersion: 1, requestId: randomUUID() } });
+    expect(inaccessibleEvidenceGeneration.status()).toBe(409);
+    expect((await a.from("complaint_versions").select("id").eq("complaint_id", evidenceDraft.id)).data).toEqual([]);
+    expect((await a.from("purchase_documents").delete().eq("id", document.data!.id).select("id")).data).toHaveLength(1);
+    const deletedEvidenceGeneration = await page.request.post(api, { data: { operation: "generate", complaintId: evidenceDraft.id, expectedVersion: 1, requestId: randomUUID() } });
+    expect(deletedEvidenceGeneration.status()).toBe(400);
+    expect((await a.from("complaint_versions").select("id").eq("complaint_id", evidenceDraft.id)).data).toEqual([]);
+    await a.from("complaints").delete().eq("id", evidenceDraft.id);
+
+    const currentSave = await page.request.post(api, { data: { ...create, complaintId, expectedVersion: 1, requestId: randomUUID(), facts: { ...facts, consumerName: "Jūratė Nauja" } } });
+    expect(currentSave.status(), await currentSave.text()).toBe(200);
+    const staleSave = await page.request.post(api, { data: { ...create, complaintId, expectedVersion: 1, requestId: randomUUID(), facts: { ...facts, consumerName: "Jūratė Pasenusi" } } });
+    expect(staleSave.status()).toBe(409);
+    const regenerate = await page.request.post(api, { data: { ...generate, expectedVersion: 2, requestId: randomUUID() } });
+    expect(regenerate.status(), await regenerate.text()).toBe(200);
+    expect((await regenerate.json()).version_no).toBe(2);
+    const updated = await a.from("purchases").update({ seller_name: "Naujas pardavėjas" }).eq("id", purchaseId).select("updated_at").single();
+    expect(updated.error).toBeNull();
+    const staleGeneration = await page.request.post(api, { data: { ...generate, requestId: randomUUID() } });
+    expect(staleGeneration.status()).toBe(400);
+    expect((await a.from("complaint_versions").select("plain_text").eq("id", versionId).single()).data?.plain_text).toContain("Bandymų parduotuvė");
+    expect((await a.from("complaints").delete().eq("id", complaintId!).select("id")).data).toHaveLength(1);
+    complaintId = undefined;
+    expect((await a.from("complaint_versions").select("id").eq("id", versionId)).data).toEqual([]);
+  } finally {
+    if (complaintId) await a.from("complaints").delete().eq("id", complaintId);
+    if (evidencePath) await a.storage.from("purchase-evidence").remove([evidencePath]);
+    if (bEvidencePath) await b.storage.from("purchase-evidence").remove([bEvidencePath]);
+    if (bPurchaseId) await b.from("purchases").delete().eq("id", bPurchaseId);
+    await a.from("purchases").delete().eq("id", purchaseId);
+    await a.auth.signOut(); await b.auth.signOut();
+  }
+});
+
+test("reviewed defect and distance withdrawal wizards save and generate private documents", async ({ page }) => {
+  test.setTimeout(120_000);
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  expect(credentials.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  const client = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  expect((await client.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const purchaseId = randomUUID();
+  const purchaseDate = localDate(4);
+  const receivedDate = localDate(3);
+  try {
+    expect((await client.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id, product_name: "Bandomoji lempa", seller_name: "Bandymų parduotuvė", purchase_date: purchaseDate, received_date: receivedDate, purchase_channel: "DISTANCE", price_cents: 3500 })).error).toBeNull();
+    await login(page, credentials.a);
+    await page.goto(`/purchases/${purchaseId}/complaints/new?flow=defect`);
+    for (const label of ["Aš kaip privatus asmuo", "Parduotuvės / įmonės", "Fizinė prekė", "Nauja"]) await page.getByRole("button", { name: label, exact: true }).click();
+    await page.getByLabel("Data").fill(receivedDate);
+    await page.getByRole("button", { name: "Toliau" }).click();
+    await page.getByLabel("Data").fill(localDate(2));
+    await page.getByRole("button", { name: "Toliau" }).click();
+    for (const label of ["Prekė sugedo arba trūkumas atsirado įprastai naudojant", "Turiu čekį", "Ne", "Pakeisti prekę"]) await page.getByRole("button", { name: label, exact: true }).click();
+    await page.getByRole("button", { name: "Parengti pretenziją" }).click();
+    await page.getByLabel("Vienas prašymas").selectOption("REPAIR");
+    await page.getByLabel("Vardas ir pavardė").fill("Jūratė Ąžuolaitė");
+    await page.getByLabel("El. paštas").fill("jurate@example.test");
+    await page.getByLabel("Prekės trūkumo aprašymas").fill("Lempa nebeįsijungia įprastai naudojant.");
+    await expect(page.getByRole("heading", { name: "Dokumento peržiūra" })).toBeVisible();
+    await page.getByRole("button", { name: "Išsaugoti juodraštį" }).click();
+    await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}/complaints/[0-9a-f-]+$`));
+    const savedDefectPath = new URL(page.url()).pathname;
+    await page.getByRole("button", { name: "Atsijungti" }).click();
+    await expect(page).toHaveURL("/");
+    await page.goto(savedDefectPath);
+    await expect(page).toHaveURL(/\/login\?next=/);
+    const form = page.getByRole("heading", { name: "Prisijungti" }).locator("..");
+    await form.getByLabel("El. paštas").fill(credentials.a.email);
+    await form.getByLabel("Slaptažodis").fill(credentials.a.password);
+    await form.getByRole("button", { name: "Prisijungti" }).click();
+    await expect(page).toHaveURL(savedDefectPath);
+    await page.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).click();
+    await expect(page.getByText("Versija 1", { exact: false })).toBeVisible();
+
+    await page.goto(`/purchases/${purchaseId}/complaints/new?flow=return`);
+    for (const label of ["Ne", "Aš kaip privatus asmuo", "Parduotuvės / įmonės"]) await page.getByRole("button", { name: label, exact: true }).click();
+    await page.getByRole("button", { name: /^Internetu/ }).click();
+    await page.getByLabel("Data").fill(receivedDate);
+    await page.getByRole("button", { name: "Toliau" }).click();
+    for (const label of ["Ne", "Ne", "Ne", "Ne, nė viena netinka", "Tik apžiūrėjau ar išbandžiau"]) await page.getByRole("button", { name: label, exact: true }).click();
+    await page.getByRole("button", { name: "Parengti sutarties atsisakymą" }).click();
+    await page.getByLabel("Vienas prašymas").selectOption("WITHDRAW");
+    await page.getByLabel("Vardas ir pavardė").fill("Jūratė Ąžuolaitė");
+    await page.getByLabel("El. paštas").fill("jurate@example.test");
+    await expect(page.getByText("Pranešu, kad atsisakau nuotoliniu būdu", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "Išsaugoti juodraštį" }).click();
+    await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}/complaints/[0-9a-f-]+$`));
+    await page.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).click();
+    await expect(page.getByText("Versija 1", { exact: false })).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.goto(`/purchases/${purchaseId}`);
+    await expect(page.getByRole("heading", { name: "Dokumentai pardavėjui" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sutarties atsisakymas" })).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  } finally {
+    await client.from("purchases").delete().eq("id", purchaseId);
+    await client.auth.signOut();
+  }
+});
+
+test("physical store assessment produces a reviewed exchange request", async ({ page }) => {
+  test.setTimeout(90_000);
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  expect(credentials.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  const client = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  expect((await client.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const purchaseId = randomUUID();
+  const purchaseDate = localDate(3);
+  try {
+    expect((await client.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id, product_name: "Bandomieji batai", seller_name: "Bandymų parduotuvė", purchase_date: purchaseDate, purchase_channel: "PHYSICAL_STORE" })).error).toBeNull();
+    await login(page, credentials.a);
+    await page.goto(`/purchases/${purchaseId}/complaints/new?flow=return`);
+    for (const label of ["Ne", "Aš kaip privatus asmuo", "Parduotuvės / įmonės"]) await page.getByRole("button", { name: label, exact: true }).click();
+    await page.getByRole("button", { name: /^Fizinėje parduotuvėje/ }).click();
+    await page.getByLabel("Data").fill(purchaseDate);
+    await page.getByRole("button", { name: "Toliau" }).click();
+    for (const label of ["Drabužiai / avalynė", "Suaugusiųjų viršutiniai drabužiai arba avalynė", "Ne", "Taip", "Turiu čekį"]) await page.getByRole("button", { name: label, exact: true }).click();
+    await page.getByRole("button", { name: "Parengti pretenziją" }).click();
+    await page.getByLabel("Vienas prašymas").selectOption("EXCHANGE");
+    await page.getByLabel("Kodėl norite pakeisti prekę?").selectOption("SIZE");
+    await page.getByLabel("Vardas ir pavardė").fill("Jūratė Ąžuolaitė");
+    await page.getByLabel("El. paštas").fill("jurate@example.test");
+    await expect(page.getByText("Prekė manęs netenkina dėl šios savybės: dydis.", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "Išsaugoti juodraštį" }).click();
+    await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}/complaints/[0-9a-f-]+$`));
+    await page.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).click();
+    await expect(page.getByText("Versija 1", { exact: false })).toBeVisible();
+  } finally {
+    await client.from("purchases").delete().eq("id", purchaseId);
+    await client.auth.signOut();
+  }
+});

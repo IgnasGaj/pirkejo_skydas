@@ -10,6 +10,7 @@ import type { DecisionResult, ReturnCaseInput } from "../domain/types";
 import { legalSources } from "@/legal/sources";
 import type { Purchase } from "@/features/purchases/domain/types";
 import { todayInVilnius } from "@/lib/date";
+import { supportedRequests } from "@/features/complaints/domain";
 
 type Step = "defective" | "defectClarification" | "buyer" | "seller" | "purchaseChannel" | "purchaseDate" | "deliveryDate" | "productCategory" | "productSubtype" | "used" | "appearanceIntact" | "purchaseEvidence" | "customMade" | "perishable" | "sealedHygiene" | "sealOpened" | "otherDistanceException" | "handlingLevel";
 
@@ -73,7 +74,7 @@ const questions: Record<Exclude<Step, "productSubtype">, { title: string; hint?:
   handlingLevel: { title: "Kaip apžiūrėjote ar naudojote prekę?", hint: "Vien pakuotės atidarymas paprastai nepanaikina atsisakymo teisės.", options: [{ label: "Neatidariau", value: "UNOPENED" }, { label: "Tik apžiūrėjau ar išbandžiau", value: "INSPECTED" }, { label: "Naudojau daugiau, nei būtina apžiūrai", value: "USED_BEYOND_INSPECTION" }, { label: "Nežinau", value: "UNKNOWN" }] }
 };
 
-function DecisionView({ decision, onBack, onRestart }: { decision: DecisionResult; onBack: () => void; onRestart: () => void }) {
+function DecisionView({ decision, onBack, onRestart, onPrepare, purchaseId }: { decision: DecisionResult; onBack: () => void; onRestart: () => void; onPrepare?: () => void; purchaseId?: string }) {
   const [showSteps, setShowSteps] = useState(false);
   return <div className="animate-in fade-in space-y-6">
     <button className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-teal-900" onClick={onBack}><ArrowLeft size={18} /> Grįžti</button>
@@ -82,6 +83,7 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DecisionResul
       <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-teal-700">Jūsų atsakymas</p>
       <h1 className="max-w-2xl text-3xl font-bold leading-tight tracking-tight text-slate-950 sm:text-4xl">{decision.title}</h1>
       <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">{decision.summary}</p>
+      {(["DISTANCE_WITHDRAWAL_LIKELY_AVAILABLE", "PHYSICAL_RETURN_LIKELY_AVAILABLE", "SELLER_CONSENT_REQUIRED"] as string[]).includes(decision.code) && <div className="mt-6"><p className="mb-3 text-sm text-slate-600">Dokumentui reikia prisijungti ir pasirinkti išsaugotą pirkinį. Patikrą reikės atlikti dar kartą.</p>{onPrepare ? <Button onClick={onPrepare}>{decision.code === "DISTANCE_WITHDRAWAL_LIKELY_AVAILABLE" ? "Parengti sutarties atsisakymą" : decision.code === "SELLER_CONSENT_REQUIRED" ? "Parengti prašymą pardavėjui" : "Parengti pretenziją"}</Button> : <Button asChild><Link href={purchaseId ? `/purchases/${purchaseId}/complaints/new?flow=return` : "/purchases"}>{decision.code === "DISTANCE_WITHDRAWAL_LIKELY_AVAILABLE" ? "Parengti sutarties atsisakymą" : "Parengti prašymą pardavėjui"}</Link></Button>}</div>}
       {decision.code === "DEFECT_FLOW_REQUIRED" && <div className="mt-6"><Button asChild><Link href="/defective-product">Tęsti sugedusios prekės patikrą <ArrowRight size={18} /></Link></Button></div>}
       {decision.nextSteps.length > 0 && decision.code === "PHYSICAL_RETURN_LIKELY_AVAILABLE" && <Button className="mt-6" onClick={() => { setShowSteps(true); document.getElementById("next-steps")?.scrollIntoView({ behavior: "smooth" }); }}>Ką daryti toliau? <ArrowRight size={18} /></Button>}
     </div>
@@ -94,7 +96,7 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DecisionResul
   </div>;
 }
 
-export function ReturnWizard({ purchase = null }: { purchase?: Pick<Purchase, "purchase_date" | "received_date" | "purchase_channel"> | null }) {
+export function ReturnWizard({ purchase = null, purchaseId, onPrepare }: { purchase?: Pick<Purchase, "purchase_date" | "received_date" | "purchase_channel"> | null; purchaseId?: string; onPrepare?: (answers: ReturnCaseInput, decision: DecisionResult) => void }) {
   const [answers, setAnswers] = useState<ReturnCaseInput>(() => ({ asOfDate: todayInVilnius() }));
   const [history, setHistory] = useState<ReturnCaseInput[]>([]);
   const [dateDraft, setDateDraft] = useState("");
@@ -120,7 +122,7 @@ export function ReturnWizard({ purchase = null }: { purchase?: Pick<Purchase, "p
   }
   function restart() { setAnswers({ asOfDate: todayInVilnius() }); setHistory([]); setDateDraft(""); }
 
-  if (decision) return <DecisionView decision={decision} onBack={back} onRestart={restart} />;
+  if (decision) return <DecisionView decision={decision} onBack={back} onRestart={restart} purchaseId={purchaseId} onPrepare={onPrepare && supportedRequests(decision.code === "DISTANCE_WITHDRAWAL_LIKELY_AVAILABLE" ? "DISTANCE_WITHDRAWAL" : "PHYSICAL_RETURN_REQUEST", decision).length ? () => onPrepare(answers, decision) : undefined} />;
   if (!step) return null;
   const clarification = step === "productSubtype" && answers.productCategory ? getProductClarification(answers.productCategory) : undefined;
   const question: { title: string; hint?: string; options?: { label: string; value: string; detail?: string }[] } = clarification

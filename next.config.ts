@@ -8,6 +8,7 @@ if (localDevHostname && !/^[A-Za-z0-9.-]+$/.test(localDevHostname)) {
 const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: process.cwd(),
+  outputFileTracingIncludes: { "/api/purchases/**": ["./assets/fonts/Lato-Regular.ttf"] },
   ...(localDevHostname ? { allowedDevOrigins: [localDevHostname] } : {}),
   experimental: { serverActions: { bodySizeLimit: "16mb" }, middlewareClientMaxBodySize: "16mb" }
 };

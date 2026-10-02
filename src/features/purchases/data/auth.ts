@@ -14,7 +14,7 @@ export function safeReturnPath(value: string | null | undefined) {
       return `${path}?draft=${draft}&document=${document}`;
     }
   }
-  return path === "/purchases" || /^\/purchases\/(new|[0-9a-f-]{36}(?:\/edit)?)$/.test(path) ? path : "/purchases";
+  return path === "/purchases" || /^\/purchases\/(new|[0-9a-f-]{36}(?:\/edit|\/complaints\/(?:new|[0-9a-f-]{36}))?)$/.test(path) ? path : "/purchases";
 }
 
 export async function requirePurchaseUser(returnPath: string) {

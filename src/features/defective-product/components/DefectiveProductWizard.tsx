@@ -12,12 +12,13 @@ import { nextDefectiveStep, type DefectiveStep } from "../domain/flow";
 import type { DefectiveDecisionResult, DefectiveProductCaseInput, RequestedRemedy } from "../domain/types";
 import type { Purchase } from "@/features/purchases/domain/types";
 import { todayInVilnius } from "@/lib/date";
+import { supportedRequests } from "@/features/complaints/domain";
 
 function displayDate(date: string): string {
   const [year, month, day] = date.split("-");
   return `${year}-${month}-${day}`;
 }
-function DecisionView({ decision, onBack, onRestart }: { decision: DefectiveDecisionResult; onBack: () => void; onRestart: () => void }) {
+function DecisionView({ decision, onBack, onRestart, onPrepare, purchaseId }: { decision: DefectiveDecisionResult; onBack: () => void; onRestart: () => void; onPrepare?: () => void; purchaseId?: string }) {
   const copy = resultCopy[decision.code];
   return <div className="space-y-5">
     <button type="button" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-teal-900" onClick={onBack}><ArrowLeft size={18} /> Grįžti</button>
@@ -27,7 +28,7 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DefectiveDeci
       <h1 className="text-3xl font-bold leading-tight tracking-tight text-slate-950 sm:text-4xl">{copy.title}</h1>
       <p className="mt-4 text-base leading-7 text-slate-700">{copy.summary}</p>
       {decision.responseDeadline && <p className="mt-5 rounded-xl bg-teal-50 p-4 text-sm font-semibold text-teal-950">Atsakymo terminas: iki {displayDate(decision.responseDeadline)} imtinai.</p>}
-      {decision.code === "CONTACT_SELLER_REPAIR_OR_REPLACE" && <Button className="mt-6" disabled aria-disabled="true">Paruošti pretenziją — netrukus</Button>}
+      {supportedRequests("DEFECTIVE_PRODUCT", decision).length > 0 && <div className="mt-6"><p className="mb-3 text-sm text-slate-600">Dokumentui reikia prisijungti ir pasirinkti išsaugotą pirkinį. Patikrą reikės atlikti dar kartą.</p>{onPrepare ? <Button onClick={onPrepare}>Parengti pretenziją</Button> : <Button asChild><Link href={purchaseId ? `/purchases/${purchaseId}/complaints/new?flow=defect` : "/purchases"}>Parengti pretenziją</Link></Button>}</div>}
       {(["SELLER_RESPONSE_OVERDUE", "VVTAT_ESCALATION_MAY_BE_AVAILABLE", "SECONDARY_REMEDIES_MAY_BE_AVAILABLE"] as string[]).includes(decision.code) && <a href={legalSources.VVTAT_CLAIMS.url} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-teal-800 px-4 py-3 text-sm font-semibold text-white hover:bg-teal-900">Kaip kreiptis į VVTAT <ExternalLink size={16} /></a>}
     </section>
     {decision.reasonIds.length > 0 && <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8"><h2 className="text-xl font-bold text-slate-950">Kodėl?</h2><p className="mt-3 text-sm leading-6 text-slate-700">{decision.statutoryPeriodEnd && decision.code !== "STATUTORY_LIABILITY_PERIOD_APPEARS_EXPIRED" ? `Įprastas pardavėjo atsakomybės laikotarpis pagal pateiktus duomenis baigiasi ${displayDate(decision.statutoryPeriodEnd)}.` : "Vertinimas remiasi jūsų atsakymais ir toliau nurodytais oficialiais šaltiniais."}</p></section>}
@@ -41,7 +42,7 @@ function DecisionView({ decision, onBack, onRestart }: { decision: DefectiveDeci
   </div>;
 }
 
-export function DefectiveProductWizard({ purchase = null }: { purchase?: Pick<Purchase, "purchase_date" | "received_date" | "purchase_channel"> | null }) {
+export function DefectiveProductWizard({ purchase = null, purchaseId, onPrepare }: { purchase?: Pick<Purchase, "purchase_date" | "received_date" | "purchase_channel"> | null; purchaseId?: string; onPrepare?: (answers: DefectiveProductCaseInput, decision: DefectiveDecisionResult) => void }) {
   const [answers, setAnswers] = useState<DefectiveProductCaseInput>(() => ({ asOfDate: todayInVilnius() }));
   const [history, setHistory] = useState<DefectiveProductCaseInput[]>([]);
   const [draft, setDraft] = useState("");
@@ -75,7 +76,7 @@ export function DefectiveProductWizard({ purchase = null }: { purchase?: Pick<Pu
   }
   function back() { const previous = history.at(-1); if (previous) { setAnswers(previous); setHistory((items) => items.slice(0, -1)); setDraft(""); } }
   function restart() { setAnswers({ asOfDate: todayInVilnius() }); setHistory([]); setDraft(""); }
-  if (decision) return <DecisionView decision={decision} onBack={back} onRestart={restart} />;
+  if (decision) return <DecisionView decision={decision} onBack={back} onRestart={restart} purchaseId={purchaseId} onPrepare={onPrepare && supportedRequests("DEFECTIVE_PRODUCT", decision).length ? () => onPrepare(answers, decision) : undefined} />;
   if (!step) return null;
   const question = step === "requestedRemedy" && answers.writtenSellerContact === "YES" ? { ...questions[step], title: "Ko prašėte pardavėjo?" } : questions[step];
   const numeric = step === "usedMonths";

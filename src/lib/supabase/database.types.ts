@@ -1,9 +1,21 @@
-// Derived from local migrations through 20261002000000_receipt_upload_claims.sql.
+// Maintained from local migrations through 20261003010000_signed_complaint_generation.sql.
 // Regenerate against a migrated local database with:
 // supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts
 export type Database = {
   public: {
     Tables: {
+      complaints: {
+        Row: { id: string; user_id: string; purchase_id: string; family: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; request_id: string; answers: Json; facts: Json; remedy: string; purchase_updated_at: string; template_version: string; source_version: string; draft_version: number; created_at: string; updated_at: string };
+        Insert: { id?: string; user_id: string; purchase_id: string; family: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; request_id: string; answers: Json; facts: Json; remedy: string; purchase_updated_at: string; template_version: string; source_version: string; draft_version?: number; created_at?: string; updated_at?: string };
+        Update: { family?: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; answers?: Json; facts?: Json; remedy?: string; purchase_updated_at?: string; template_version?: string; source_version?: string };
+        Relationships: [];
+      };
+      complaint_versions: {
+        Row: { id: string; user_id: string; purchase_id: string; complaint_id: string; version_no: number; request_id: string; document_date: string; snapshot: Json; sections: Json; plain_text: string; template_version: string; source_version: string; generated_at: string };
+        Insert: { id?: string; user_id: string; purchase_id: string; complaint_id: string; version_no: number; request_id: string; document_date: string; snapshot: Json; sections: Json; plain_text: string; template_version: string; source_version: string; generated_at?: string };
+        Update: Record<never, never>;
+        Relationships: [];
+      };
       purchases: {
         Row: {
           id: string; user_id: string; product_name: string; seller_name: string;
@@ -61,6 +73,7 @@ export type Database = {
     };
     Views: Record<never, never>;
     Functions: {
+      generate_signed_complaint_version: { Args: { p_payload: string; p_signature: string }; Returns: Database["public"]["Tables"]["complaint_versions"]["Row"] };
       set_purchase_updated_at: { Args: Record<never, never>; Returns: unknown };
       claim_reviewed_receipt: { Args: {
         p_purchase_id: string; p_document_id: string; p_path: string; p_filename: string;
@@ -71,6 +84,8 @@ export type Database = {
     CompositeTypes: Record<never, never>;
   };
 };
+
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type Row<Table extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][Table]["Row"];
 export type Insert<Table extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][Table]["Insert"];
