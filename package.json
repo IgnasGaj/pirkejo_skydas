@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "start": "next start",
     "test": "vitest run",
+    "test:integration": "vitest run src/features/purchases/data/document-service.integration.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:auth": "playwright test tests/e2e/authenticated.spec.ts tests/e2e/receipt-authenticated.spec.ts tests/e2e/complaints-authenticated.spec.ts --workers=1",
     "typecheck": "tsc --noEmit"

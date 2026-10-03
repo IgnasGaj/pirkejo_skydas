@@ -41,7 +41,9 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  const [dirty, setDirty] = useState(Boolean(legacyReductionDeclaration));
+  const [localRevision, setLocalRevision] = useState(legacyReductionDeclaration ? 1 : 0);
+  const [savedRevision, setSavedRevision] = useState(0);
+  const dirty = localRevision !== savedRevision;
   const [legacyNeedsSave, setLegacyNeedsSave] = useState(Boolean(legacyReductionDeclaration));
   // Allocate after hydration so server and browser render the same initial markup.
   const [saveRequestId, setSaveRequestId] = useState<string | null>(null);
@@ -55,6 +57,16 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
   const [reviewRecovery, setReviewRecovery] = useState(false);
   const [today, setToday] = useState(todayInVilnius);
   const allowLeave = useRef(false);
+  const leaveAttempt = useRef(0);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  function markEdited() { leaveAttempt.current += 1; allowLeave.current = false; setLocalRevision((revision) => revision + 1); }
+  function beginLeaving() {
+    const attempt = ++leaveAttempt.current;
+    allowLeave.current = true;
+    // A cancelled or failed navigation must not grant a lasting unload bypass.
+    window.setTimeout(() => { if (leaveAttempt.current === attempt) allowLeave.current = false; }, 2000);
+  }
   const purchaseChanged = Boolean(initialDraft && boundPurchaseVersion !== purchase.updated_at);
   const discoveryChanged = family === "DEFECTIVE_PRODUCT" && facts.defectDiscoveredAt !== ((answers as DefectiveProductCaseInput | null)?.defectDetectedAt ?? null);
   const needsReassessment = (purchaseChanged && !reassessed) || discoveryChanged;
@@ -84,7 +96,7 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
   function adoptDraft(draft: Complaint) {
     setFamily(draft.family); setAnswers(draft.answers as Answers); setRemedy(draft.remedy as Request);
     setFacts(draft.facts as Facts); setDraftVersion(draft.draft_version); setBoundPurchaseVersion(draft.purchase_updated_at);
-    setDirty(false); setRemoteDraft(null); setReviewRecovery(false); setReassessed(false); setError("");
+    setLocalRevision(0); setSavedRevision(0); setRemoteDraft(null); setReviewRecovery(false); setReassessed(false); setError("");
     setSaveRequestId(createBrowserUuid());
   }
   useEffect(() => {
@@ -96,29 +108,39 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
   }, [initialDraft?.id, initialDraft?.draft_version]);
   useEffect(() => {
     if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => { if (allowLeave.current) return; event.preventDefault(); event.returnValue = ""; };
+    const warn = (event: BeforeUnloadEvent) => { if (allowLeave.current) { allowLeave.current = false; return; } event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   useEffect(() => {
-    if (!dirty) return;
+    const sentinel = `complaint-${crypto.randomUUID?.() ?? Date.now()}`;
+    const pushSentinel = () => window.history.pushState({ ...window.history.state, complaintLeaveSentinel: sentinel }, "", window.location.href);
+    let passingBack = false;
     const intercept = (event: MouseEvent) => {
-      const link = (event.target as Element).closest("a[href]") as HTMLAnchorElement | null;
-      if (!link || link.origin !== window.location.origin || link.pathname === window.location.pathname && link.search === window.location.search) return;
+      if (!dirtyRef.current || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !(event.target instanceof Element)) return;
+      const link = event.target.closest("a[href]") as HTMLAnchorElement | null;
+      if (!link || link.hasAttribute("download") || (link.target && link.target.toLowerCase() !== "_self")) return;
+      if (link.origin === window.location.origin && link.pathname === window.location.pathname && link.search === window.location.search) return;
       if (!window.confirm("Yra neišsaugotų pakeitimų. Išeiti ir juos atmesti?")) event.preventDefault();
-      else { allowLeave.current = true; setDirty(false); }
+      else beginLeaving();
     };
-    const onBack = () => {
-      if (allowLeave.current) return;
-      if (window.confirm("Yra neišsaugotų pakeitimų. Išeiti ir juos atmesti?")) {
-        allowLeave.current = true; setDirty(false); window.history.back();
-      } else window.history.pushState(null, "", window.location.href);
+    const onBack = (event: PopStateEvent) => {
+      if (event.state?.complaintLeaveSentinel === sentinel) return;
+      if (passingBack) { passingBack = false; return; }
+      if (dirtyRef.current && !window.confirm("Yra neišsaugotų pakeitimų. Išeiti ir juos atmesti?")) {
+        pushSentinel();
+        return;
+      }
+      passingBack = true;
+      beginLeaving();
+      window.history.back();
     };
     document.addEventListener("click", intercept, true);
-    window.history.pushState(null, "", window.location.href);
+    pushSentinel();
     window.addEventListener("popstate", onBack);
     return () => { document.removeEventListener("click", intercept, true); window.removeEventListener("popstate", onBack); };
-  }, [dirty]);
+  // One sentinel for the mounted composer, regardless of edit/save cycles.
+  }, []);
   async function loadLatest() {
     const id = recoveredDraft?.id ?? initialDraft?.id;
     if (!id) return;
@@ -131,7 +153,7 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Nepavyko įkelti juodraščio."); }
     finally { setBusy(false); }
   }
-  function change<K extends keyof Facts>(key: K, value: Facts[K]) { setFacts((before) => ({ ...before, [key]: value })); setDirty(true); }
+  function change<K extends keyof Facts>(key: K, value: Facts[K]) { setFacts((before) => ({ ...before, [key]: value })); markEdited(); }
   function prepared(selectedFamily: Family, selectedAnswers: Answers) {
     setFamily(selectedFamily); setAnswers(selectedAnswers); setRemedy(null); setFacts((before) => ({ ...before,
       sellerName: purchase.seller_name, productName: purchase.product_name, purchaseDate: purchase.purchase_date,
@@ -141,7 +163,7 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
       confirmedNotMinor: false,
       defectDiscoveredAt: selectedFamily === "DEFECTIVE_PRODUCT" ? (selectedAnswers as DefectiveProductCaseInput).defectDetectedAt ?? null : null
     }));
-    setFlow(null); setReassessed(true); setDirty(true);
+    setFlow(null); setReassessed(true); markEdited();
   }
   async function submit(operation: "save" | "generate" | "delete") {
     if (operation !== "delete" && (!family || !answers || !remedy)) return;
@@ -165,12 +187,12 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
       }
       if (!result) throw new Error("Serveris negrąžino suprantamo atsakymo. Įvesti duomenys išliko; bandykite dar kartą.");
       if (operation === "save") {
-        allowLeave.current = true; setDirty(false); setLegacyNeedsSave(false); setSaveRequestId(createBrowserUuid()); setDraftVersion(result.draft_version); setBoundPurchaseVersion(purchase.updated_at); setReassessed(false); setReviewRecovery(false);
-        if (!initialDraft) router.push(`/purchases/${purchase.id}/complaints/${result.id}`);
+        setSavedRevision(localRevision); setLegacyNeedsSave(false); setSaveRequestId(createBrowserUuid()); setDraftVersion(result.draft_version); setBoundPurchaseVersion(purchase.updated_at); setReassessed(false); setReviewRecovery(false);
+        if (!initialDraft) { beginLeaving(); router.push(`/purchases/${purchase.id}/complaints/${result.id}`); }
         else { setStatus("Juodraštis išsaugotas."); router.refresh(); }
       } else if (operation === "generate") {
         setGenerateRequestId(createBrowserUuid()); setStatus("Dokumentas parengtas. Pateikite jį pardavėjui ir išsaugokite pateikimo įrodymą."); router.refresh();
-      } else { allowLeave.current = true; setDirty(false); router.push(`/purchases/${purchase.id}`); }
+      } else { beginLeaving(); router.push(`/purchases/${purchase.id}`); }
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Veiksmas nepavyko."); }
     finally { setBusy(false); }
   }
@@ -186,9 +208,9 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">Patikrinkite duomenis. Dokumentą pardavėjui turėsite pateikti patys. Priedus pridėkite prie laiško atskirai.</div>
     {uuidReady && (!saveRequestId || (initialDraft && !generateRequestId)) && <p role="alert" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950">Šioje naršyklėje negalima saugiai sukurti naujos užklausos. Nukopijuokite įvestus duomenis ir bandykite atnaujintoje naršyklėje.</p>}
     {legacyNeedsSave && <p role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950">Kainos sumažinimui nebereikia patvirtinti, kad trūkumas nėra nedidelis. Peržiūrėkite ir išsaugokite atnaujintą juodraštį prieš rengdami dokumentą.</p>}
-    {reviewRecovery && <section role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm"><p>Išsaugotas juodraštis skiriasi nuo šiuo metu įvestų duomenų. Jūsų įrašai išliko. Įkelkite išsaugotą versiją ir pasirinkite, ką daryti.</p><button type="button" onClick={loadLatest} className="mt-3 min-h-11 rounded-xl border border-teal-700 px-4 font-semibold">Įkelti išsaugotą versiją</button>{remoteDraft && <div className="mt-3 space-y-2"><p>Išsaugota versija {remoteDraft.draft_version}: {(remoteDraft.facts as Facts).consumerName}. Peržiūrėkite pakeitimus prieš tęsdami.</p><button type="button" onClick={() => adoptDraft(remoteDraft)} className="mr-3 min-h-11 rounded-xl border border-teal-700 px-4 font-semibold">Naudoti išsaugotą versiją</button><button type="button" onClick={() => { setRecoveredDraft({ id: remoteDraft.id, draft_version: remoteDraft.draft_version }); setDraftVersion(remoteDraft.draft_version); setBoundPurchaseVersion(remoteDraft.purchase_updated_at); setSaveRequestId(createBrowserUuid()); setReviewRecovery(false); setRemoteDraft(null); setDirty(true); setStatus("Pakeitimai paruošti. Peržiūrėkite dokumentą ir išsaugokite."); }} className="min-h-11 rounded-xl bg-teal-800 px-4 font-semibold text-white">Pritaikyti mano pakeitimus</button></div>}</section>}
+    {reviewRecovery && <section role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm"><p>Išsaugotas juodraštis skiriasi nuo šiuo metu įvestų duomenų. Jūsų įrašai išliko. Įkelkite išsaugotą versiją ir pasirinkite, ką daryti.</p><button type="button" onClick={loadLatest} className="mt-3 min-h-11 rounded-xl border border-teal-700 px-4 font-semibold">Įkelti išsaugotą versiją</button>{remoteDraft && <div className="mt-3 space-y-2"><p>Išsaugota versija {remoteDraft.draft_version}: {(remoteDraft.facts as Facts).consumerName}. Peržiūrėkite pakeitimus prieš tęsdami.</p><button type="button" onClick={() => adoptDraft(remoteDraft)} className="mr-3 min-h-11 rounded-xl border border-teal-700 px-4 font-semibold">Naudoti išsaugotą versiją</button><button type="button" onClick={() => { setRecoveredDraft({ id: remoteDraft.id, draft_version: remoteDraft.draft_version }); setDraftVersion(remoteDraft.draft_version); setBoundPurchaseVersion(remoteDraft.purchase_updated_at); setSaveRequestId(createBrowserUuid()); setReviewRecovery(false); setRemoteDraft(null); markEdited(); setStatus("Pakeitimai paruošti. Peržiūrėkite dokumentą ir išsaugokite."); }} className="min-h-11 rounded-xl bg-teal-800 px-4 font-semibold text-white">Pritaikyti mano pakeitimus</button></div>}</section>}
     {(initialDraft || purchaseChanged || discoveryChanged) && <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5"><h2 className="font-bold">{purchaseChanged ? "Pirkinys pasikeitė" : discoveryChanged ? "Trūkumo data pasikeitė" : "Teisinė patikra"}</h2><p className="mt-2 text-sm">Pakartokite teisinę patikrą ir patvirtinkite atnaujintus duomenis. Ankstesnės dokumento versijos išliks.</p>{!flow && <button type="button" className="mt-3 min-h-12 rounded-xl bg-teal-800 px-5 font-semibold text-white" onClick={() => { setReassessed(false); setFlow(family === "DEFECTIVE_PRODUCT" ? "defect" : "return"); }}>Pakartoti teisinę patikrą</button>}{flow === "defect" && <DefectiveProductWizard purchase={purchase} onPrepare={(a) => prepared("DEFECTIVE_PRODUCT", a)} />}{flow === "return" && <ReturnWizard purchase={purchase} onPrepare={(a, decision) => prepared(decision.code === "DISTANCE_WITHDRAWAL_LIKELY_AVAILABLE" ? "DISTANCE_WITHDRAWAL" : "PHYSICAL_RETURN_REQUEST", a)} />}</section>}
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7"><h2 className="text-xl font-bold">Pirkinys ir prašymas</h2><p className="mt-3 text-sm">{familyLabels[family]} · {purchase.product_name} · {purchase.seller_name} · {purchase.purchase_date}</p><p className="mt-2 text-sm text-slate-600">Pirkinio faktus keiskite <Link className="font-semibold text-teal-800 underline" href={`/purchases/${purchase.id}/edit`}>pirkinio įraše</Link>. Po pakeitimo teisinę patikrą reikės pakartoti.</p><label className="mt-5 block text-sm font-semibold">Vienas prašymas<select className={inputClass} value={remedy ?? ""} onChange={(event) => { const selected = event.target.value as Request; setRemedy(selected); if (selected !== "TERMINATION_REFUND") setFacts((before) => ({ ...before, confirmedNotMinor: false })); setDirty(true); }}><option value="">Pasirinkite</option>{choices.map((item) => <option key={item} value={item}>{requestLabels[item]}</option>)}</select></label>{!choices.length && <p role="alert" className="mt-3 text-sm text-rose-800">Šis rezultatas neleidžia rengti galutinio reikalavimo. Pakartokite patikrą.</p>}</section>
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7"><h2 className="text-xl font-bold">Pirkinys ir prašymas</h2><p className="mt-3 text-sm">{familyLabels[family]} · {purchase.product_name} · {purchase.seller_name} · {purchase.purchase_date}</p><p className="mt-2 text-sm text-slate-600">Pirkinio faktus keiskite <Link className="font-semibold text-teal-800 underline" href={`/purchases/${purchase.id}/edit`}>pirkinio įraše</Link>. Po pakeitimo teisinę patikrą reikės pakartoti.</p><label className="mt-5 block text-sm font-semibold">Vienas prašymas<select className={inputClass} value={remedy ?? ""} onChange={(event) => { const selected = event.target.value as Request; setRemedy(selected); if (selected !== "TERMINATION_REFUND") setFacts((before) => ({ ...before, confirmedNotMinor: false })); markEdited(); }}><option value="">Pasirinkite</option>{choices.map((item) => <option key={item} value={item}>{requestLabels[item]}</option>)}</select></label>{!choices.length && <p role="alert" className="mt-3 text-sm text-rose-800">Šis rezultatas neleidžia rengti galutinio reikalavimo. Pakartokite patikrą.</p>}</section>
     <section id="reviewed-facts" className="grid gap-5 rounded-2xl border border-slate-200 bg-white p-5 sm:grid-cols-2 sm:p-7"><h2 className="text-xl font-bold sm:col-span-2">Peržiūrėti duomenys</h2>
       <label className="text-sm font-semibold">Vardas ir pavardė<input className={inputClass} maxLength={120} value={facts.consumerName} onChange={(event) => change("consumerName", event.target.value)} required /></label>
       <label className="text-sm font-semibold">El. paštas<input className={inputClass} type="email" maxLength={254} value={facts.consumerEmail} onChange={(event) => change("consumerEmail", event.target.value)} required /></label>

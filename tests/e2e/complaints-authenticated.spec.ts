@@ -280,6 +280,98 @@ test("mobile internal navigation retains unsaved complaint facts until explicit 
   }
 });
 
+test("new tabs keep unsaved facts dirty; repeated saves rearm unload and Back; generation uses displayed saved facts", async ({ page, context }) => {
+  test.setTimeout(120_000);
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  const a = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  expect((await a.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const purchaseId = randomUUID(), complaintId = randomUUID();
+  const purchaseDate = localDate(4), receivedDate = localDate(3), discovered = localDate(2), today = localDate(0);
+  try {
+    const created = await a.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id, product_name: "Bandymo kėdė", seller_name: "Bandymų parduotuvė", purchase_date: purchaseDate, received_date: receivedDate, purchase_channel: "DISTANCE" }).select("updated_at").single();
+    expect(created.error).toBeNull();
+    const facts = { consumerName: "Išsaugotas Vardas", consumerEmail: "old@example.test", sellerName: "Bandymų parduotuvė", sellerContact: "", productName: "Bandymo kėdė", purchaseDate, receivedDate, purchaseChannel: "DISTANCE", referenceNumber: "", priceCents: null, documentDate: today, defectDescription: "Kėdės koja yra sulūžusi.", defectDiscoveredAt: discovered, reductionCents: null, reductionExplanation: "", physicalReason: null, confirmedNotMinor: false, alternativeProof: "", evidenceIds: [] };
+    const answers = { buyerType: "CONSUMER", sellerType: "PROFESSIONAL", transactionKind: "GOODS", goodsConditionAtSale: "NEW", purchasedAt: purchaseDate, deliveredAt: receivedDate, defectDetectedAt: discovered, apparentCause: "NORMAL_USE_OR_UNKNOWN_DEFECT", purchaseEvidence: "INVOICE", writtenSellerContact: "NO" };
+    expect((await a.from("complaints").insert({ id: complaintId, user_id: credentials.a.id, purchase_id: purchaseId, family: "DEFECTIVE_PRODUCT", request_id: randomUUID(), answers, facts, remedy: "REPAIR", purchase_updated_at: created.data!.updated_at, template_version: "test", source_version: "test" })).error).toBeNull();
+    await login(page, credentials.a);
+    await page.goto(`/purchases/${purchaseId}/complaints/${complaintId}`);
+    const name = page.getByLabel("Vardas ir pavardė");
+    const generate = page.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" });
+    const editLink = page.getByRole("link", { name: "pirkinio įraše" });
+    await name.fill("Neišsaugotas Vardas");
+    await expect(generate).toBeDisabled();
+    await page.evaluate((id) => { const link = document.createElement("a"); link.href = `/purchases/${id}/edit`; link.target = "_blank"; link.textContent = "Bandymo naujas skirtukas"; document.body.append(link); }, purchaseId);
+    for (const [link, modifiers] of [
+      [page.getByRole("link", { name: "Bandymo naujas skirtukas" }), undefined],
+      [editLink, ["ControlOrMeta"] as const], [editLink, ["Shift"] as const]
+    ] as const) {
+      const opened = context.waitForEvent("page");
+      await link.click(modifiers ? { modifiers: [...modifiers] } : undefined);
+      await (await opened).close();
+      await expect(name).toHaveValue("Neišsaugotas Vardas");
+      await expect(generate).toBeDisabled();
+    }
+    await expect(page.getByText("Vartotojas: Neišsaugotas Vardas", { exact: false })).toBeVisible();
+    page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("neišsaugotų pakeitimų"); await dialog.dismiss(); });
+    await page.getByRole("link", { name: "← Pirkinys" }).click();
+    await expect(name).toHaveValue("Neišsaugotas Vardas");
+    const historyLength = await page.evaluate(() => history.length);
+    for (const savedName of ["Pirmas išsaugotas", "Antras išsaugotas"]) {
+      await name.fill(savedName);
+      await page.getByRole("button", { name: "Išsaugoti juodraštį" }).click();
+      await expect(page.getByText("Juodraštis išsaugotas.")).toBeVisible();
+      await expect(generate).toBeEnabled();
+      expect(await page.evaluate(() => history.length)).toBe(historyLength);
+      await name.fill(`${savedName} neišsaugota`);
+      expect(await page.evaluate(() => { const event = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; })).toBe(true);
+      await expect(generate).toBeDisabled();
+      page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("neišsaugotų pakeitimų"); await dialog.dismiss(); });
+      await page.getByRole("link", { name: "← Pirkinys" }).click();
+      await expect(name).toHaveValue(`${savedName} neišsaugota`);
+      if (savedName === "Pirmas išsaugotas") {
+        const warning = page.waitForEvent("dialog");
+        await page.evaluate(() => { window.setTimeout(() => window.location.reload(), 0); });
+        const dialog = await warning;
+        expect(dialog.type()).toBe("beforeunload");
+        await dialog.dismiss();
+        await expect(name).toHaveValue(`${savedName} neišsaugota`);
+      }
+      page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("neišsaugotų pakeitimų"); await dialog.dismiss(); });
+      await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => null);
+      await expect(name).toHaveValue(`${savedName} neišsaugota`);
+    }
+    await name.fill("Galutinis išsaugotas");
+    await page.getByRole("button", { name: "Išsaugoti juodraštį" }).click();
+    await expect(generate).toBeEnabled();
+    await expect(page.getByText("Vartotojas: Galutinis išsaugotas", { exact: false })).toBeVisible();
+    expect((await a.from("complaints").select("facts").eq("id", complaintId).single()).data?.facts).toMatchObject({ consumerName: "Galutinis išsaugotas" });
+    await generate.click();
+    await expect(page.getByText("Dokumentas parengtas.", { exact: false })).toBeVisible();
+    const generated = await a.from("complaint_versions").select("snapshot,plain_text").eq("complaint_id", complaintId).single();
+    expect(generated.error).toBeNull();
+    expect(generated.data?.snapshot).toMatchObject({ facts: { consumerName: "Galutinis išsaugotas" } });
+    expect(generated.data?.plain_text).toContain("Galutinis išsaugotas");
+    const closingPage = await context.newPage();
+    await closingPage.goto(page.url());
+    await closingPage.getByLabel("Vardas ir pavardė").fill("Uždarymo bandymas");
+    const closeWarning = closingPage.waitForEvent("dialog");
+    await closingPage.close({ runBeforeUnload: true });
+    const closeDialog = await closeWarning;
+    expect(closeDialog.type()).toBe("beforeunload");
+    await closeDialog.dismiss();
+    expect(closingPage.isClosed()).toBe(false);
+    await expect(closingPage.getByLabel("Vardas ir pavardė")).toHaveValue("Uždarymo bandymas");
+    await closingPage.close();
+    await name.fill("Dar vienas neišsaugotas");
+    page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("neišsaugotų pakeitimų"); await dialog.accept(); });
+    await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => null);
+    await expect(page).not.toHaveURL(new RegExp(`/complaints/${complaintId}$`));
+  } finally {
+    await a.from("purchases").delete().eq("id", purchaseId);
+    await a.auth.signOut();
+  }
+});
+
 test("signed generation waits for an evidence deletion transaction and rejects its tombstone", async ({ page }) => {
   test.setTimeout(60_000);
   const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;

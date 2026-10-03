@@ -34,6 +34,7 @@ jobs:
           npx supabase start -x mailpit
       - name: Create ordinary local test accounts
         run: node scripts/prepare-local-e2e.mjs >> "$GITHUB_ENV"
+      - run: npm run test:integration
       - run: npm run build
       - run: npm run test:e2e:auth
       - run: node scripts/check-dev-purchase-forms.mjs

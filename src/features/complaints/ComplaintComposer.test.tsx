@@ -46,7 +46,7 @@ const evidence = {
   content_sha256: null, upload_claim_token: null, upload_claim_expires_at: null
 } as PurchaseDocument;
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); push.mockReset(); refresh.mockReset(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); push.mockReset(); refresh.mockReset(); });
 
 function withoutRandomUuid() {
   let next = 0;
@@ -298,4 +298,67 @@ it("protects an internal exit and retains edited facts when it is cancelled", as
   const allowed = fireEvent.click(screen.getByRole("link", { name: "Redaguoti pirkinį" }));
   expect(allowed).toBe(false);
   expect(screen.getByLabelText("Vardas ir pavardė")).toHaveProperty("value", "Mano Vardas");
+});
+
+it("keeps unsaved facts dirty through target-blank and modifier links", async () => {
+  const confirm = vi.fn(() => true);
+  vi.stubGlobal("confirm", confirm);
+  const user = userEvent.setup();
+  render(<><Link href="/purchases/other/edit" target="_blank" onClick={(event) => event.preventDefault()}>Naujas skirtukas</Link>
+    <Link href="/purchases/other/edit" onClick={(event) => event.preventDefault()}>Kitas puslapis</Link>
+    <Link href="/purchases/other/edit" download onClick={(event) => event.preventDefault()}>Atsisiųsti</Link>
+    <a href="#reviewed-facts" onClick={(event) => event.preventDefault()}>Toje pačioje vietoje</a>
+    <ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} /></>);
+  await user.clear(screen.getByLabelText("Vardas ir pavardė"));
+  await user.type(screen.getByLabelText("Vardas ir pavardė"), "Mano Vardas");
+  const generate = screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" });
+  for (const [link, options] of [
+    ["Naujas skirtukas", {}], ["Kitas puslapis", { metaKey: true }],
+    ["Kitas puslapis", { ctrlKey: true }], ["Kitas puslapis", { shiftKey: true }],
+    ["Atsisiųsti", {}], ["Toje pačioje vietoje", {}]
+  ] as const) {
+    fireEvent.click(screen.getByRole("link", { name: link }), options);
+    expect(screen.getByLabelText("Vardas ir pavardė")).toHaveProperty("value", "Mano Vardas");
+    expect(generate.matches(":disabled")).toBe(true);
+  }
+  expect(confirm).not.toHaveBeenCalled();
+  const unload = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+});
+
+it("rearms unload and Back after every save and later edit without accumulating sentinels", async () => {
+  let version = 1;
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ id: draft.id, draft_version: ++version }) })));
+  const confirm = vi.fn(() => false);
+  vi.stubGlobal("confirm", confirm);
+  const pushState = vi.spyOn(window.history, "pushState");
+  const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+  const user = userEvent.setup();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  const sentinel = (pushState.mock.calls[0][0] as { complaintLeaveSentinel: string }).complaintLeaveSentinel;
+  const sentinelPushes = () => pushState.mock.calls.filter(([state]) => (state as { complaintLeaveSentinel?: string })?.complaintLeaveSentinel === sentinel).length;
+  const initialPushes = sentinelPushes();
+  expect(initialPushes).toBe(1);
+  for (const name of ["Pirmas Vardas", "Antras Vardas"]) {
+    await user.clear(screen.getByLabelText("Vardas ir pavardė"));
+    await user.type(screen.getByLabelText("Vardas ir pavardė"), name);
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    expect(screen.getByLabelText("Vardas ir pavardė")).toHaveProperty("value", name);
+    expect(back).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Išsaugoti juodraštį" }));
+    await waitFor(() => expect(screen.getByText("Juodraštis išsaugotas.")).toBeTruthy());
+    const cleanUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanUnload);
+    expect(cleanUnload.defaultPrevented).toBe(false);
+  }
+  expect(sentinelPushes()).toBe(initialPushes + 2); // Only cancelled Back attempts rearm this sentinel.
+  await user.type(screen.getByLabelText("Vardas ir pavardė"), " trečias");
+  confirm.mockReturnValue(true);
+  window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+  expect(back).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).matches(":disabled")).toBe(true);
 });
