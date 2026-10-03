@@ -1,5 +1,7 @@
 # Pirkėjo Skydas — Sprint 5 inspection
 
+> Sprint 5.2 follow-up (2026-10-03): F5 below records a later device finding. The original F1–F4 inspection and its historical verdict are unchanged; this is not a new full Sprint 5 audit.
+
 Inspection date: 2026-10-02
 Repository: https://github.com/IgnasGaj/pirkejo_skydas
 Inspected branch: `feature/sprint-05-complaints`
@@ -24,6 +26,7 @@ This inspection changed no application source, tracked repository files, migrati
 | F2 | P1 | A non-minor-defect declaration incorrectly blocks price-reduction requests | Executed actual domain validation; checked official VVTAT guidance and EU legislative text |
 | F3 | P2 | An existing draft cannot be rebound/reassessed after its purchase changes | Actual UI/API/SQL control-flow review; not independently reproduced on a live database |
 | F4 | P2 | When the assessment's defect date is unknown, the letter accepts an unrelated future or contradictory discovery date | Executed actual domain validation and letter rendering |
+| F5 (later follow-up) | P1 | Complaint composer crashes when `crypto.randomUUID` is unavailable | Reported actual iPhone/Safari runtime error; four direct composer calls confirmed in Sprint 5.1 source. Original screenshot does not show the URL scheme. |
 
 Priorities: P1 means resolve before merge because the document workflow can misrepresent the reviewed facts or legal options. P2 means required correctness/recovery behavior also needs fixing for sprint acceptance. None of these findings demonstrates unauthorized access to another account.
 

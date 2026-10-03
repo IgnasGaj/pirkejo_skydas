@@ -10,6 +10,7 @@ import { ReturnWizard } from "@/features/returns/components/ReturnWizard";
 import { DefectiveProductWizard } from "@/features/defective-product/components/DefectiveProductWizard";
 import type { DefectiveProductCaseInput } from "@/features/defective-product/domain/types";
 import { todayInVilnius } from "@/lib/date";
+import { createBrowserUuid } from "@/lib/browser-uuid";
 import { decide, renderLetter, selectEvidence, supportedRequests, validateReviewed, type Answers, type Facts, type Family, type Request } from "./domain";
 import { legalSources } from "@/legal/sources";
 
@@ -42,8 +43,10 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(Boolean(legacyReductionDeclaration));
   const [legacyNeedsSave, setLegacyNeedsSave] = useState(Boolean(legacyReductionDeclaration));
-  const [saveRequestId, setSaveRequestId] = useState(() => crypto.randomUUID());
-  const [generateRequestId, setGenerateRequestId] = useState(() => crypto.randomUUID());
+  // Allocate after hydration so server and browser render the same initial markup.
+  const [saveRequestId, setSaveRequestId] = useState<string | null>(null);
+  const [generateRequestId, setGenerateRequestId] = useState<string | null>(null);
+  const [uuidReady, setUuidReady] = useState(false);
   const [draftVersion, setDraftVersion] = useState(initialDraft?.draft_version ?? 0);
   const [boundPurchaseVersion, setBoundPurchaseVersion] = useState(initialDraft?.purchase_updated_at ?? purchase.updated_at);
   const [reassessed, setReassessed] = useState(false);
@@ -61,6 +64,11 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
     } catch (failure) { return { preview: null, message: failure instanceof Error ? failure.message : "Patikrinkite duomenis." }; }
   }, [family, remedy, current, choices, facts, purchase, documents]);
   const preview = previewState.preview;
+  useEffect(() => {
+    setSaveRequestId(createBrowserUuid());
+    setGenerateRequestId(createBrowserUuid());
+    setUuidReady(true);
+  }, []);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -81,22 +89,24 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
   }
   async function submit(operation: "save" | "generate" | "delete") {
     if (!family || !answers || !remedy) return;
+    const requestId = operation === "generate" ? generateRequestId : saveRequestId;
+    if (!requestId) { setError("Šioje naršyklėje negalima saugiai sukurti naujos užklausos. Nukopijuokite įvestus duomenis ir bandykite atnaujintoje naršyklėje."); return; }
     setBusy(true); setError(""); setStatus("");
     try {
       const response = await fetch(`/api/purchases/${purchase.id}/complaints`, {
         method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
         body: JSON.stringify({ operation, complaintId: initialDraft?.id, expectedVersion: draftVersion || undefined,
           rebind: operation === "save" && Boolean(initialDraft && boundPurchaseVersion !== purchase.updated_at && reassessed),
-          requestId: operation === "generate" ? generateRequestId : saveRequestId, family, answers, facts, remedy })
+          requestId, family, answers, facts, remedy })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Veiksmas nepavyko.");
       if (operation === "save") {
-        setDirty(false); setLegacyNeedsSave(false); setSaveRequestId(crypto.randomUUID()); setDraftVersion(result.draft_version); setBoundPurchaseVersion(purchase.updated_at); setReassessed(false);
+        setDirty(false); setLegacyNeedsSave(false); setSaveRequestId(createBrowserUuid()); setDraftVersion(result.draft_version); setBoundPurchaseVersion(purchase.updated_at); setReassessed(false);
         if (!initialDraft) router.push(`/purchases/${purchase.id}/complaints/${result.id}`);
         else { setStatus("Juodraštis išsaugotas."); router.refresh(); }
       } else if (operation === "generate") {
-        setGenerateRequestId(crypto.randomUUID()); setStatus("Dokumentas parengtas. Pateikite jį pardavėjui ir išsaugokite pateikimo įrodymą."); router.refresh();
+        setGenerateRequestId(createBrowserUuid()); setStatus("Dokumentas parengtas. Pateikite jį pardavėjui ir išsaugokite pateikimo įrodymą."); router.refresh();
       } else router.push(`/purchases/${purchase.id}`);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Veiksmas nepavyko."); }
     finally { setBusy(false); }
@@ -111,6 +121,7 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
   const inputClass = "mt-2 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700";
   return <fieldset disabled={busy} className="space-y-7">
     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">Patikrinkite duomenis. Dokumentą pardavėjui turėsite pateikti patys. Priedus pridėkite prie laiško atskirai.</div>
+    {uuidReady && (!saveRequestId || (initialDraft && !generateRequestId)) && <p role="alert" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950">Šioje naršyklėje negalima saugiai sukurti naujos užklausos. Nukopijuokite įvestus duomenis ir bandykite atnaujintoje naršyklėje.</p>}
     {legacyNeedsSave && <p role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950">Kainos sumažinimui nebereikia patvirtinti, kad trūkumas nėra nedidelis. Peržiūrėkite ir išsaugokite atnaujintą juodraštį prieš rengdami dokumentą.</p>}
     {(purchaseChanged || discoveryChanged) && <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5"><h2 className="font-bold">{purchaseChanged ? "Pirkinys pasikeitė" : "Trūkumo data pasikeitė"}</h2><p className="mt-2 text-sm">Pakartokite teisinę patikrą ir patvirtinkite atnaujintus duomenis. Ankstesnės dokumento versijos išliks.</p>{!flow && <button type="button" className="mt-3 min-h-12 rounded-xl bg-teal-800 px-5 font-semibold text-white" onClick={() => { setReassessed(false); setFlow(family === "DEFECTIVE_PRODUCT" ? "defect" : "return"); }}>Pakartoti teisinę patikrą</button>}{flow === "defect" && <DefectiveProductWizard purchase={purchase} onPrepare={(a) => prepared("DEFECTIVE_PRODUCT", a)} />}{flow === "return" && <ReturnWizard purchase={purchase} onPrepare={(a, decision) => prepared(decision.code === "DISTANCE_WITHDRAWAL_LIKELY_AVAILABLE" ? "DISTANCE_WITHDRAWAL" : "PHYSICAL_RETURN_REQUEST", a)} />}</section>}
     <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7"><h2 className="text-xl font-bold">Pirkinys ir prašymas</h2><p className="mt-3 text-sm">{familyLabels[family]} · {purchase.product_name} · {purchase.seller_name} · {purchase.purchase_date}</p><p className="mt-2 text-sm text-slate-600">Pirkinio faktus keiskite <Link className="font-semibold text-teal-800 underline" href={`/purchases/${purchase.id}/edit`}>pirkinio įraše</Link>. Po pakeitimo teisinę patikrą reikės pakartoti.</p><label className="mt-5 block text-sm font-semibold">Vienas prašymas<select className={inputClass} value={remedy ?? ""} onChange={(event) => { const selected = event.target.value as Request; setRemedy(selected); if (selected !== "TERMINATION_REFUND") setFacts((before) => ({ ...before, confirmedNotMinor: false })); setDirty(true); }}><option value="">Pasirinkite</option>{choices.map((item) => <option key={item} value={item}>{requestLabels[item]}</option>)}</select></label>{!choices.length && <p role="alert" className="mt-3 text-sm text-rose-800">Šis rezultatas neleidžia rengti galutinio reikalavimo. Pakartokite patikrą.</p>}</section>
@@ -132,7 +143,7 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
     {preview ? <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7"><h2 className="text-xl font-bold">Dokumento peržiūra</h2><p className="mt-2 text-sm text-slate-600">Tai ne pateikimo pardavėjui įrodymas. Patikrinkite visus faktus.</p><pre className="mt-5 whitespace-pre-wrap break-words rounded-xl bg-slate-50 p-4 font-sans text-sm leading-7 text-slate-900">{preview.text}</pre></section> : <p role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950">{previewState.message}</p>}
     <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7"><h2 className="text-xl font-bold">Oficialūs šaltiniai</h2><ul className="mt-3 space-y-2 text-sm">{(family === "DEFECTIVE_PRODUCT" ? ["VVTAT_GUARANTEES", "VVTAT_CLAIMS", "LT_CIVIL_CODE"] : family === "DISTANCE_WITHDRAWAL" ? ["VVTAT_FAQ", "LT_CIVIL_CODE"] : ["VVTAT_GUARANTEES", "LT_RETAIL_RULES"]).map((key) => <li key={key}><a className="text-teal-800 underline" href={legalSources[key as keyof typeof legalSources].url} target="_blank" rel="noopener noreferrer">{legalSources[key as keyof typeof legalSources].title}</a></li>)}</ul></section>
     {error && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-900">{error}</p>}{status && <p role="status" className="rounded-xl bg-teal-50 p-4 text-sm text-teal-950">{status}</p>}
-    <div className="flex flex-wrap gap-3">{initialDraft && <a href="#reviewed-facts" className="min-h-12 content-center rounded-xl border border-slate-300 px-5 font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700">Redaguoti juodraštį</a>}<button type="button" disabled={busy || needsReassessment || !preview} onClick={() => submit("save")} className="min-h-12 rounded-xl border border-teal-700 px-5 font-semibold text-teal-900 disabled:opacity-50">Išsaugoti juodraštį</button>{initialDraft && <button type="button" disabled={busy || needsReassessment || dirty || !preview} onClick={() => submit("generate")} className="min-h-12 rounded-xl bg-teal-800 px-5 font-semibold text-white disabled:opacity-50">{versions.length ? "Parengti naują versiją" : "Patvirtinti ir parengti dokumentą"}</button>}{initialDraft && <button type="button" disabled={busy} onClick={() => { if (window.confirm("Ištrinti dokumentą ir visas jo versijas?")) submit("delete"); }} className="min-h-12 rounded-xl border border-rose-300 px-5 font-semibold text-rose-800">Ištrinti dokumentą</button>}</div>
+    <div className="flex flex-wrap gap-3">{initialDraft && <a href="#reviewed-facts" className="min-h-12 content-center rounded-xl border border-slate-300 px-5 font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700">Redaguoti juodraštį</a>}<button type="button" disabled={busy || !saveRequestId || needsReassessment || !preview} onClick={() => submit("save")} className="min-h-12 rounded-xl border border-teal-700 px-5 font-semibold text-teal-900 disabled:opacity-50">Išsaugoti juodraštį</button>{initialDraft && <button type="button" disabled={busy || !generateRequestId || needsReassessment || dirty || !preview} onClick={() => submit("generate")} className="min-h-12 rounded-xl bg-teal-800 px-5 font-semibold text-white disabled:opacity-50">{versions.length ? "Parengti naują versiją" : "Patvirtinti ir parengti dokumentą"}</button>}{initialDraft && <button type="button" disabled={busy || !saveRequestId} onClick={() => { if (window.confirm("Ištrinti dokumentą ir visas jo versijas?")) submit("delete"); }} className="min-h-12 rounded-xl border border-rose-300 px-5 font-semibold text-rose-800">Ištrinti dokumentą</button>}</div>
     {initialDraft && <section className="space-y-4"><h2 className="text-xl font-bold">Parengtos versijos</h2>{versions.length === 0 && <p className="text-sm text-slate-600">Dar nėra parengto dokumento.</p>}{versions.map((version) => <SavedVersion key={version.id} purchaseId={purchase.id} complaintId={initialDraft.id} version={version} />)}</section>}
   </fieldset>;
 }

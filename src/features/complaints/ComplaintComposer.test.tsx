@@ -47,8 +47,98 @@ const evidence = {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); push.mockReset(); refresh.mockReset(); });
 
+function withoutRandomUuid() {
+  let next = 0;
+  vi.stubGlobal("crypto", { getRandomValues(bytes: Uint8Array) {
+    for (let index = 0; index < bytes.length; index++) bytes[index] = (next++ * 17) & 255;
+    return bytes;
+  } });
+}
+
+it("opens a new complaint with no randomUUID and keeps the legal wizard available", () => {
+  withoutRandomUuid();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialFlow="defect" />);
+  expect(screen.getByRole("button", { name: "Patvirtinti patikrą" })).toBeTruthy();
+});
+
+it("reuses fallback IDs after failed saves and generations, then rotates each after success", async () => {
+  withoutRandomUuid();
+  const submitted: Array<{ operation: string; requestId: string }> = [];
+  const responses = [
+    { ok: false, json: async () => ({ error: "Ryšys nutrūko." }) },
+    { ok: true, json: async () => ({ id: draft.id, draft_version: 2 }) },
+    { ok: true, json: async () => ({ id: draft.id, draft_version: 3 }) },
+    { ok: false, json: async () => ({ error: "Ryšys nutrūko." }) },
+    { ok: true, json: async () => ({ id: "version-1", version_no: 1 }) },
+    { ok: true, json: async () => ({ id: "version-2", version_no: 2 }) }
+  ];
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, options: { body: string }) => {
+    submitted.push(JSON.parse(options.body));
+    return responses.shift();
+  }));
+  const user = userEvent.setup();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  const save = screen.getByRole("button", { name: "Išsaugoti juodraštį" });
+  const generate = screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" });
+  for (let index = 0; index < 3; index++) {
+    await user.click(save);
+    await waitFor(() => expect(submitted).toHaveLength(index + 1));
+    await waitFor(() => expect(save.matches(":disabled")).toBe(false));
+  }
+  for (let index = 3; index < 6; index++) {
+    await user.click(generate);
+    await waitFor(() => expect(submitted).toHaveLength(index + 1));
+    await waitFor(() => expect(generate.matches(":disabled")).toBe(false));
+  }
+  const ids = submitted.map(({ requestId }) => requestId);
+  ids.forEach((id) => expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/));
+  expect(ids[1]).toBe(ids[0]);
+  expect(ids[2]).not.toBe(ids[1]);
+  expect(ids[4]).toBe(ids[3]);
+  expect(ids[5]).not.toBe(ids[4]);
+  expect(submitted.map(({ operation }) => operation)).toEqual(["save", "save", "save", "generate", "generate", "generate"]);
+});
+
+it("keeps entered facts and disables requests when both secure random APIs are absent", async () => {
+  vi.stubGlobal("crypto", {});
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const user = userEvent.setup();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  await user.clear(screen.getByLabelText("Vardas ir pavardė"));
+  await user.type(screen.getByLabelText("Vardas ir pavardė"), "Jūratė Bandomoji");
+  expect(screen.getByLabelText("Vardas ir pavardė")).toHaveProperty("value", "Jūratė Bandomoji");
+  expect(screen.getByRole("alert").textContent).toContain("negalima saugiai sukurti naujos užklausos");
+  expect(screen.getByRole("button", { name: "Išsaugoti juodraštį" }).matches(":disabled")).toBe(true);
+  expect(screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).matches(":disabled")).toBe(true);
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("keeps successful save and generation outcomes when later ID rotation becomes unavailable", async () => {
+  let calls = 0;
+  vi.stubGlobal("crypto", { getRandomValues(bytes: Uint8Array) {
+    if (++calls > 2) throw new Error("random source unavailable");
+    bytes.fill(calls);
+    return bytes;
+  } });
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, options: { body: string }) => {
+    const { operation } = JSON.parse(options.body);
+    return { ok: true, json: async () => operation === "save" ? { id: draft.id, draft_version: 2 } : { id: "version-1", version_no: 1 } };
+  }));
+  const user = userEvent.setup();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  await user.click(screen.getByRole("button", { name: "Išsaugoti juodraštį" }));
+  await waitFor(() => expect(screen.getByText("Juodraštis išsaugotas.")).toBeTruthy());
+  expect(screen.getByRole("button", { name: "Išsaugoti juodraštį" }).matches(":disabled")).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }));
+  await waitFor(() => expect(screen.getByText("Dokumentas parengtas.", { exact: false })).toBeTruthy());
+  expect(screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).matches(":disabled")).toBe(true);
+  expect(screen.getByLabelText("Vardas ir pavardė")).toHaveProperty("value", "Senas Vardas");
+});
+
 for (const existing of [false, true]) {
   it(`keeps ${existing ? "existing" : "new"} draft facts frozen through a delayed save and confirms that revision`, async () => {
+    withoutRandomUuid();
     let resolve!: (value: unknown) => void;
     const submitted: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn((_url: string, options: { body: string }) => {

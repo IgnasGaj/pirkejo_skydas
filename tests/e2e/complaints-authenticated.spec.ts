@@ -232,6 +232,11 @@ test("private drafts, retry-safe generation, exports, ownership and stale facts 
 
 test("reviewed defect and distance withdrawal wizards save and generate private documents", async ({ page }) => {
   test.setTimeout(120_000);
+  // Chromium on localhost normally has randomUUID. Remove it before every page load
+  // to exercise the same missing-API condition as the reported browser session.
+  await page.addInitScript(() => {
+    Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+  });
   const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
   expect(credentials.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   const client = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -243,6 +248,7 @@ test("reviewed defect and distance withdrawal wizards save and generate private 
     expect((await client.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id, product_name: "Bandomoji lempa", seller_name: "Bandymų parduotuvė", purchase_date: purchaseDate, received_date: receivedDate, purchase_channel: "DISTANCE", price_cents: 3500 })).error).toBeNull();
     await login(page, credentials.a);
     await page.goto(`/purchases/${purchaseId}/complaints/new?flow=defect`);
+    expect(await page.evaluate(() => ({ uuid: typeof crypto.randomUUID, randomBytes: typeof crypto.getRandomValues }))).toEqual({ uuid: "undefined", randomBytes: "function" });
     for (const label of ["Aš kaip privatus asmuo", "Parduotuvės / įmonės", "Fizinė prekė", "Nauja"]) await page.getByRole("button", { name: label, exact: true }).click();
     await page.getByLabel("Data", { exact: true }).fill(receivedDate);
     await page.getByRole("button", { name: "Toliau" }).click();
@@ -285,6 +291,17 @@ test("reviewed defect and distance withdrawal wizards save and generate private 
     const savedDefect = (await client.from("complaints").select("id").eq("purchase_id", purchaseId).eq("family", "DEFECTIVE_PRODUCT").single()).data!;
     const savedVersion = (await client.from("complaint_versions").select("plain_text").eq("complaint_id", savedDefect.id).single()).data!;
     expect(savedVersion.plain_text.trim()).toBe(confirmedPreview?.trim());
+    const savedVersionId = (await client.from("complaint_versions").select("id").eq("complaint_id", savedDefect.id).single()).data!.id;
+    const exportBase = `/api/purchases/${purchaseId}/complaints/${savedDefect.id}/versions/${savedVersionId}`;
+    const textExport = await page.request.get(`${exportBase}?format=txt`);
+    expect(textExport.status()).toBe(200);
+    expect(await textExport.text()).toContain("Jūratė Nauja");
+    const pdfExport = await page.request.get(`${exportBase}?format=pdf`);
+    expect(pdfExport.status()).toBe(200);
+    expect((await pdfExport.body()).subarray(0, 5).toString()).toBe("%PDF-");
+    await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true }));
+    await page.getByRole("button", { name: "Kopijuoti tekstą" }).first().click();
+    await expect(page.getByText("Nepavyko nukopijuoti. Pažymėkite tekstą žemiau ir nukopijuokite patys.")).toBeVisible();
     expect((await client.from("purchases").update({ notes: "Patikslinta pastaba" }).eq("id", purchaseId)).error).toBeNull();
     await page.goto(savedDefectPath);
     await page.getByRole("button", { name: "Pakartoti teisinę patikrą" }).click();
