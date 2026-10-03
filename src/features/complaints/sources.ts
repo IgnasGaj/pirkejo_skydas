@@ -1,5 +1,13 @@
-export const complaintSourceVersion = "2026-10-02";
+export const complaintSourceVersion = "2026-10-03";
 export const complaintSources = {
+  secondaryRemedyClarification: {
+    title: "VVTAT vartotojų teisės ir garantijos; Direktyva (ES) 2019/771",
+    url: "https://vvtat.lrv.lt/lt/veiklos-sritys-54/ne-maisto-produktai-55/vartotoju-teises-ir-garantijos-714/",
+    supportingUrl: "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:02019L0771-20260731",
+    sections: "CK 6.364¹ ir 6.364³ paaiškinimas; direktyvos 13 straipsnio 4–5 dalys",
+    verifiedAt: "2026-10-03", effectiveFrom: "2026-07-31", effectiveTo: null,
+    rule: "Esant patvirtintam antrinio reikalavimo pagrindui, nedidelis trūkumas savaime neužkerta kelio proporcingam kainos sumažinimui; nedidelio trūkumo išimtis taikoma sutarties nutraukimui, o jo mažumą įrodo pardavėjas."
+  },
   defectRemedies: {
     title: "Lietuvos Respublikos civilinis kodeksas (suvestinė redakcija)",
     url: "https://www.e-tar.lt/rs/actualedition/TAR.8A39C83848CB/eMNCPopNFw/format/ISO_PDF/",

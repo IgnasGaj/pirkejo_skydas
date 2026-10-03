@@ -29,6 +29,24 @@ const withdrawalAnswers = {
 };
 
 describe("complaint eligibility and canonical Lithuanian letter", () => {
+  it("allows a supported price reduction without a non-minor declaration, but guards termination", () => {
+    const secondary = decide("DEFECTIVE_PRODUCT", { ...defectAnswers, writtenSellerContact: "YES", sellerClaim: { receivedAt: "2026-09-26", requestedRemedy: "REPAIR" }, sellerOutcome: "REPAIR_FAILED_OR_DEFECT_RECURRED" }, today)!;
+    expect(secondary.decision.code).toBe("SECONDARY_REMEDIES_MAY_BE_AVAILABLE");
+    const reduction = { ...facts, reductionCents: 1000, reductionExplanation: "Kėdė išlieka netinkama įprastai naudoti." };
+    expect(validateReviewed("DEFECTIVE_PRODUCT", secondary.answers, secondary.decision, "PRICE_REDUCTION", reduction, purchase, today).confirmedNotMinor).toBe(false);
+    expect(() => validateReviewed("DEFECTIVE_PRODUCT", secondary.answers, secondary.decision, "TERMINATION_REFUND", reduction, purchase, today)).toThrow();
+  });
+  it("requires newly supplied discovery dates to match the assessment and rejects impossible dates", () => {
+    const unknown = decide("DEFECTIVE_PRODUCT", { ...defectAnswers, defectDetectedAt: undefined }, today)!;
+    const unknownFacts = validateReviewed("DEFECTIVE_PRODUCT", unknown.answers, unknown.decision, "REPAIR", { ...facts, defectDiscoveredAt: null }, purchase, today);
+    expect(unknownFacts.defectDiscoveredAt).toBeNull();
+    expect(renderLetter("DEFECTIVE_PRODUCT", "REPAIR", unknownFacts, []).text).not.toContain("Trūkumą pastebėjau:");
+    const known = decide("DEFECTIVE_PRODUCT", defectAnswers, today)!;
+    expect(() => validateReviewed("DEFECTIVE_PRODUCT", known.answers, known.decision, "REPAIR", { ...facts, defectDiscoveredAt: null }, purchase, today)).toThrow();
+    for (const defectDiscoveredAt of ["2030-01-01", "2026-09-21", "2026-09-25"]) {
+      expect(() => validateReviewed("DEFECTIVE_PRODUCT", unknown.answers, unknown.decision, "REPAIR", { ...facts, defectDiscoveredAt }, purchase, today)).toThrow();
+    }
+  });
   it("maps only explicit supported engine codes and rejects forged remedies", () => {
     const assessed = decide("DEFECTIVE_PRODUCT", defectAnswers, today)!;
     expect(assessed.decision.code).toBe("CONTACT_SELLER_REPAIR_OR_REPLACE");

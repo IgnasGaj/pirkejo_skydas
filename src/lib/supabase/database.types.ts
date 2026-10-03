@@ -1,13 +1,13 @@
-// Maintained from local migrations through 20261003010000_signed_complaint_generation.sql.
+// Maintained from local migrations through 20261003020000_complaint_reassessment.sql.
 // Regenerate against a migrated local database with:
 // supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts
 export type Database = {
   public: {
     Tables: {
       complaints: {
-        Row: { id: string; user_id: string; purchase_id: string; family: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; request_id: string; answers: Json; facts: Json; remedy: string; purchase_updated_at: string; template_version: string; source_version: string; draft_version: number; created_at: string; updated_at: string };
-        Insert: { id?: string; user_id: string; purchase_id: string; family: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; request_id: string; answers: Json; facts: Json; remedy: string; purchase_updated_at: string; template_version: string; source_version: string; draft_version?: number; created_at?: string; updated_at?: string };
-        Update: { family?: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; answers?: Json; facts?: Json; remedy?: string; purchase_updated_at?: string; template_version?: string; source_version?: string };
+        Row: { id: string; user_id: string; purchase_id: string; family: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; request_id: string; answers: Json; facts: Json; remedy: string; purchase_updated_at: string; template_version: string; source_version: string; draft_version: number; last_save_request_id: string | null; last_save_hash: string | null; created_at: string; updated_at: string };
+        Insert: { id?: string; user_id: string; purchase_id: string; family: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; request_id: string; answers: Json; facts: Json; remedy: string; purchase_updated_at: string; template_version: string; source_version: string; draft_version?: number; last_save_request_id?: string | null; last_save_hash?: string | null; created_at?: string; updated_at?: string };
+        Update: { family?: "DEFECTIVE_PRODUCT" | "DISTANCE_WITHDRAWAL" | "PHYSICAL_RETURN_REQUEST"; answers?: Json; facts?: Json; remedy?: string; purchase_updated_at?: string; template_version?: string; source_version?: string; last_save_request_id?: string | null; last_save_hash?: string | null };
         Relationships: [];
       };
       complaint_versions: {
@@ -73,6 +73,7 @@ export type Database = {
     };
     Views: Record<never, never>;
     Functions: {
+      save_reviewed_complaint: { Args: { p_complaint_id: string; p_expected_version: number; p_purchase_updated_at: string; p_rebind: boolean; p_request_id: string; p_family: string; p_answers: Json; p_facts: Json; p_remedy: string; p_template_version: string; p_source_version: string }; Returns: Database["public"]["Tables"]["complaints"]["Row"] };
       generate_signed_complaint_version: { Args: { p_payload: string; p_signature: string }; Returns: Database["public"]["Tables"]["complaint_versions"]["Row"] };
       set_purchase_updated_at: { Args: Record<never, never>; Returns: unknown };
       claim_reviewed_receipt: { Args: {

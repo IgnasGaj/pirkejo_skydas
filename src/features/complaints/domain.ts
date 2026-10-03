@@ -6,8 +6,8 @@ import { evaluateDefectiveProductCase } from "@/features/defective-product/domai
 import type { DefectiveProductCaseInput } from "@/features/defective-product/domain/types";
 import type { Purchase, PurchaseDocument } from "@/features/purchases/domain/types";
 
-export const TEMPLATE_VERSION = "2026-10-02.1";
-export const SOURCE_VERSION = "2026-10-02";
+export const TEMPLATE_VERSION = "2026-10-03.1";
+export const SOURCE_VERSION = "2026-10-03";
 export const familySchema = z.enum(["DEFECTIVE_PRODUCT", "DISTANCE_WITHDRAWAL", "PHYSICAL_RETURN_REQUEST"]);
 export type Family = z.infer<typeof familySchema>;
 export const requestSchema = z.enum(["REPAIR", "REPLACEMENT", "PRICE_REDUCTION", "TERMINATION_REFUND", "WITHDRAW", "EXCHANGE", "CONSENT_RETURN"]);
@@ -76,14 +76,15 @@ export function validateReviewed(family: Family, answers: Answers, decision: { c
   if (family === "DEFECTIVE_PRODUCT") {
     const a = answers as DefectiveProductCaseInput;
     if (!facts.defectDescription || facts.defectDescription.length < 10) throw new Error("Aprašykite prekės trūkumą bent 10 simbolių.");
-    if (a.defectDetectedAt && facts.defectDiscoveredAt !== a.defectDetectedAt) throw new Error("Trūkumo data nesutampa su patikra. Pakartokite patikrą.");
-    if ((request === "TERMINATION_REFUND" || request === "PRICE_REDUCTION") && !facts.confirmedNotMinor) throw new Error("Patvirtinkite, kad trūkumas nėra nedidelis, arba pasirinkite kitą prašymą.");
+    if (facts.defectDiscoveredAt && (facts.defectDiscoveredAt < (purchase.received_date ?? purchase.purchase_date) || facts.defectDiscoveredAt > today)) throw new Error("Trūkumo pastebėjimo data negali būti ankstesnė už prekės gavimą ar vėlesnė už šiandieną.");
+    if (facts.defectDiscoveredAt !== (a.defectDetectedAt ?? null)) throw new Error("Trūkumo data nesutampa su patikra. Pakartokite patikrą.");
+    if (request === "TERMINATION_REFUND" && !facts.confirmedNotMinor) throw new Error("Peržiūrėkite trūkumo reikšmingumą prieš prašydami nutraukti sutartį.");
     if (request === "TERMINATION_REFUND" && facts.priceCents == null) throw new Error("Grąžinimo sumai reikia patvirtintos prekės kainos.");
     if (request === "PRICE_REDUCTION" && (facts.priceCents == null || !facts.reductionCents || facts.reductionCents > facts.priceCents || facts.reductionExplanation.length < 10)) throw new Error("Nurodykite pagrįstą sumažinimo sumą ir paaiškinimą.");
   }
   if (family === "DISTANCE_WITHDRAWAL" && !facts.receivedDate) throw new Error("Nurodykite prekės gavimo datą.");
   if (request === "EXCHANGE" && !facts.physicalReason) throw new Error("Nurodykite, dėl kurios savybės norite pakeisti prekę.");
-  return facts;
+  return request === "PRICE_REDUCTION" ? { ...facts, confirmedNotMinor: false } : facts;
 }
 
 export type EvidenceSnapshot = Pick<PurchaseDocument, "id" | "original_filename" | "document_type">;
@@ -95,7 +96,7 @@ export function selectEvidence(ids: string[], documents: PurchaseDocument[]): Ev
   });
 }
 
-export function renderLetter(family: Family, request: Request, facts: Facts, evidence: EvidenceSnapshot[]) {
+export function renderLetter(family: Family, request: Request, facts: Facts, evidence: EvidenceSnapshot[], decision?: { code: string; secondaryRemedyGrounds?: string[] }) {
   const money = (cents: number) => `${(cents / 100).toFixed(2)} EUR`;
   const quoted = (value: string) => value.replace(/\r\n?/g, "\n").split("\n").map((line) => `  ${line}`).join("\n");
   const title = family === "DISTANCE_WITHDRAWAL" ? "PRANEŠIMAS APIE NUOTOLINĖS SUTARTIES ATSISAKYMĄ" : family === "DEFECTIVE_PRODUCT" ? "PRETENZIJA DĖL NEKOKYBIŠKOS PREKĖS" : "PRAŠYMAS DĖL PREKĖS KEITIMO AR GRĄŽINIMO";
@@ -106,6 +107,18 @@ export function renderLetter(family: Family, request: Request, facts: Facts, evi
   ];
   if (family === "DEFECTIVE_PRODUCT") {
     sections.push(`Mano aprašytas prekės trūkumas:\n${quoted(facts.defectDescription)}${facts.defectDiscoveredAt ? `\nTrūkumą pastebėjau: ${facts.defectDiscoveredAt}` : ""}`);
+    if (request === "PRICE_REDUCTION" || request === "TERMINATION_REFUND") {
+      const grounds: Record<string, string> = {
+        SELLER_DID_NOT_REPAIR_OR_REPLACE: "pardavėjas prekės nepataisė arba nepakeitė",
+        SELLER_REFUSED_CONFORMITY_REMEDY: "pardavėjas atsisakė taisyti arba pakeisti prekę",
+        DEFECT_PERSISTS_AFTER_ATTEMPT: "trūkumas išliko arba atsirado pakartotinai po bandymo pašalinti neatitiktį",
+        POTENTIALLY_SERIOUS_DEFECT: "nurodytas galimai esminis prekės trūkumas",
+        SELLER_WILL_NOT_ACT_WITHIN_REASONABLE_TIME: "pardavėjas nurodė, kad per protingą laiką prekės netaisys arba nekeis",
+        SIGNIFICANT_INCONVENIENCE: "taisymas arba keitimas sukeltų didelių nepatogumų"
+      };
+      const reviewedGrounds = decision?.secondaryRemedyGrounds?.map((ground) => grounds[ground]).filter(Boolean) ?? [];
+      if (reviewedGrounds.length) sections.push(`Pagal mano pateiktus patikros duomenis: ${reviewedGrounds.join("; ")}.`);
+    }
     const clause: Record<string, string> = {
       REPAIR: "Prašau neatlygintinai pataisyti prekę.", REPLACEMENT: "Prašau pakeisti prekę tinkamos kokybės preke.",
       PRICE_REDUCTION: `Prašau sumažinti prekės kainą ${money(facts.reductionCents!)}. Mano pagrindimas:\n${quoted(facts.reductionExplanation)}`,
