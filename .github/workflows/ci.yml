@@ -30,7 +30,8 @@ jobs:
       - name: Start disposable Supabase
         run: |
           sed -i 's/enable_confirmations = true/enable_confirmations = false/' supabase/config.toml
-          npx supabase start
+          # Email confirmation is disabled for disposable accounts; no mail inbox is needed.
+          npx supabase start -x mailpit
       - name: Create ordinary local test accounts
         run: node scripts/prepare-local-e2e.mjs >> "$GITHUB_ENV"
       - run: npm run build
