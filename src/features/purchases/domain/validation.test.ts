@@ -22,6 +22,14 @@ describe("purchase validation", () => {
     expect(() => parsePriceToCents("3,999")).toThrow();
     expect(purchaseSchema.safeParse({ ...valid(), price: "3,999" }).success).toBe(false);
   });
+  it("shares the complaint price ceiling and single-line facts", () => {
+    expect(purchaseSchema.safeParse({ ...valid(), price: "1000000.00" }).success).toBe(true);
+    expect(purchaseSchema.safeParse({ ...valid(), price: "1000000.01" }).success).toBe(false);
+    for (const value of ["Pardavėjas\nKitas", "Prekė\u2028Kita", "Kodas\t1"]) {
+      expect(purchaseSchema.safeParse({ ...valid(), sellerName: value }).success).toBe(false);
+      expect(purchaseSchema.safeParse({ ...valid(), referenceNumber: value }).success).toBe(false);
+    }
+  });
   it("rejects unsupported MIME types", () => expect(validateDocumentFile({ name: "script.exe", type: "application/x-msdownload", size: 10 })).toBe("unsupported"));
   it("rejects files above 15 MB", () => expect(validateDocumentFile({ name: "receipt.pdf", type: "application/pdf", size: 15 * 1024 * 1024 + 1 })).toBe("too-large"));
   it("allows PDF and HEIC evidence while excluding them from automatic scans", () => {

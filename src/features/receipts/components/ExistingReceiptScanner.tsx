@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { ReceiptScanner } from "./ReceiptScanner";
 import type { ReceiptSuggestions } from "../domain/types";
@@ -26,6 +26,8 @@ export function ExistingReceiptScanner({ purchase, document, action }: { purchas
   const [suggestions, setSuggestions] = useState<ReceiptSuggestions | null>(null);
   const [proposed, setProposed] = useState<Record<Name, string>>({ productName: "", sellerName: "", purchaseDate: "", price: "", referenceNumber: "" });
   const [priceOrigin, setPriceOrigin] = useState<ReviewPrice["priceOrigin"]>(null);
+  const session = useRef(0);
+  const pending = useRef<AbortController | null>(null);
   const [state, formAction] = useActionState(action, { error: null });
   const current: Record<Name, string> = {
     productName: purchase.product_name, sellerName: purchase.seller_name, purchaseDate: purchase.purchase_date,
@@ -33,19 +35,24 @@ export function ExistingReceiptScanner({ purchase, document, action }: { purchas
   };
 
   async function load() {
+    const run = ++session.current;
+    const controller = new AbortController();
+    pending.current?.abort(); pending.current = controller;
+    setFile(null); setSuggestions(null); setProposed({ productName: "", sellerName: "", purchaseDate: "", price: "", referenceNumber: "" }); setPriceOrigin(null);
     setOpen(true); setLoading(true); setError("");
     try {
-      const response = await fetch(`/api/purchases/${purchase.id}/documents/${document.id}/image`, { cache: "no-store" });
+      const response = await fetch(`/api/purchases/${purchase.id}/documents/${document.id}/image`, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error("unavailable");
       const size = Number(response.headers.get("Content-Length"));
       if (!Number.isFinite(size) || size <= 0 || size > 15 * 1024 * 1024 || size !== document.size_bytes) throw new Error("unavailable");
       const blob = await response.blob();
       if (blob.size !== size || blob.type !== document.mime_type) throw new Error("unavailable");
-      setFile(new File([blob], document.original_filename, { type: document.mime_type }));
-    } catch { setError("Čekis nepasiekiamas. Atnaujinkite puslapį ir bandykite dar kartą."); }
-    finally { setLoading(false); }
+      if (run === session.current) setFile(new File([blob], document.original_filename, { type: document.mime_type }));
+    } catch { if (run === session.current) setError("Čekis nepasiekiamas. Atnaujinkite puslapį ir bandykite dar kartą."); }
+    finally { if (run === session.current) { setLoading(false); pending.current = null; } }
   }
   function onResult(result: ReceiptSuggestions) {
+    if (!open) return;
     setSuggestions(result);
     setProposed((previous) => ({ ...previous,
       sellerName: previous.sellerName || result.seller?.value || "",
@@ -55,7 +62,7 @@ export function ExistingReceiptScanner({ purchase, document, action }: { purchas
   }
   return <div className="mt-4 border-t border-slate-200 pt-4">
     {!open ? <button type="button" onClick={load} className="min-h-12 rounded-xl border border-teal-700 px-4 font-semibold text-teal-900">Nuskaityti čekį</button> :
-      <div className="space-y-4"><button type="button" onClick={() => { setOpen(false); setFile(null); setSuggestions(null); }} className="min-h-11 font-semibold text-teal-800 underline">Uždaryti nuskaitymą</button>
+      <div className="space-y-4"><button type="button" onClick={() => { session.current++; pending.current?.abort(); pending.current = null; setOpen(false); setLoading(false); setFile(null); setSuggestions(null); setError(""); setProposed({ productName: "", sellerName: "", purchaseDate: "", price: "", referenceNumber: "" }); setPriceOrigin(null); }} className="min-h-11 font-semibold text-teal-800 underline">Uždaryti nuskaitymą</button>
         {loading && <p role="status">Įkeliamas privatus čekis…</p>}
         {error && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm">{error}</p>}
         <ReceiptScanner file={file} onResult={onResult} />

@@ -203,6 +203,35 @@ test("two-account RLS and authenticated purchase lifecycle", async ({ page, brow
   }
 });
 
+test("a collection beyond one page remains navigable with accurate evidence badges", async ({ page }) => {
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  const a = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  expect((await a.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const ids = Array.from({ length: 22 }, () => randomUUID());
+  const oldest = [...ids].sort().at(0)!;
+  const path = `${credentials.a.id}/${oldest}/${randomUUID()}.pdf`;
+  try {
+    const rows = ids.map((id) => ({ id, user_id: credentials.a.id, product_name: `Sprint 5.3 puslapis ${id}`, seller_name: "Bandymų parduotuvė", purchase_date: localDate(3), purchase_channel: "UNKNOWN" as const }));
+    expect((await a.from("purchases").insert(rows)).error).toBeNull();
+    const bytes = Buffer.from("%PDF-1.4\n% synthetic test\n");
+    expect((await a.storage.from(bucket).upload(path, bytes, { contentType: "application/pdf", upsert: false })).error).toBeNull();
+    expect((await a.from("purchase_documents").insert({ user_id: credentials.a.id, purchase_id: oldest, document_type: "RECEIPT", original_filename: "synthetic.pdf", storage_path: path, mime_type: "application/pdf", size_bytes: bytes.length })).error).toBeNull();
+    await page.goto("/login"); await login(page, credentials.a);
+    await expect(page).toHaveURL(/\/purchases(?:\?|$)/);
+    await page.goto("/purchases");
+    await expect(page.getByRole("link", { name: /Sprint 5\.3 puslapis/ })).toHaveCount(20);
+    await page.getByRole("link", { name: "Kiti →" }).click();
+    await expect(page.getByRole("link", { name: /Sprint 5\.3 puslapis/ })).toHaveCount(2);
+    await expect(page.getByText("Pirkimo įrodymas išsaugotas")).toHaveCount(1);
+    await page.getByRole("link", { name: "← Ankstesni" }).click();
+    await expect(page.getByRole("link", { name: /Sprint 5\.3 puslapis/ })).toHaveCount(20);
+  } finally {
+    await a.storage.from(bucket).remove([path]);
+    await a.from("purchases").delete().in("id", ids);
+    await a.auth.signOut();
+  }
+});
+
 test("stale purchase edit keeps newer seller, date, and price", async ({ page, context }) => {
   const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
   const client = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });

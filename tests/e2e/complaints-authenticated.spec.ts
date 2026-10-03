@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Page } from "@playwright/test";
 import type { Database } from "../../src/lib/supabase/database.types";
@@ -53,7 +54,25 @@ test("private drafts, retry-safe generation, exports, ownership and stale facts 
     complaintId = created.id;
     const retry = await page.request.post(api, { data: create });
     expect((await retry.json()).id).toBe(complaintId);
+    const editedRetry = await page.request.post(api, { data: { ...create, facts: { ...facts, consumerName: "Kitas Vardas" } } });
+    expect(editedRetry.status()).toBe(409);
+    expect(await editedRetry.json()).toMatchObject({ code: "CREATION_CHANGED", id: complaintId });
+    const recovered = await page.request.get(`${api}?complaintId=${complaintId}`);
+    expect(recovered.status()).toBe(200);
+    expect((await recovered.json()).draft.facts.consumerName).toBe(facts.consumerName);
     expect((await a.from("complaints").select("id").eq("purchase_id", purchaseId)).data).toHaveLength(1);
+    const oversized = await page.request.post(api, { data: { ...create, requestId: randomUUID(), facts: { ...facts, defectDescription: "漢".repeat(4000), reductionExplanation: "漢".repeat(1000), alternativeProof: "漢".repeat(500) } } });
+    expect(oversized.status()).toBe(400);
+    expect((await oversized.json()).code).toBe("INVALID_FIELD");
+    const longFacts = { ...facts, defectDescription: `Kėdės trūkumas: ${"ą".repeat(1500)}` };
+    const longSave = await page.request.post(api, { data: { ...create, requestId: randomUUID(), facts: longFacts } });
+    expect(longSave.status(), await longSave.text()).toBe(200);
+    const longDraft = await longSave.json();
+    const longGenerate = await page.request.post(api, { data: { operation: "generate", complaintId: longDraft.id, expectedVersion: 1, requestId: randomUUID() } });
+    expect(longGenerate.status(), await longGenerate.text()).toBe(200);
+    const longText = await page.request.get(`/api/purchases/${purchaseId}/complaints/${longDraft.id}/versions/${(await longGenerate.json()).id}?format=txt`);
+    expect(await longText.text()).toContain("ą".repeat(1500));
+    expect((await page.request.post(api, { data: { operation: "delete", complaintId: longDraft.id, requestId: randomUUID() } })).status()).toBe(200);
 
     expect((await b.from("complaints").select("id").eq("id", complaintId!)).data).toEqual([]);
     expect((await anon.from("complaints").select("id").eq("id", complaintId!)).data).toEqual([]);
@@ -149,7 +168,8 @@ test("private drafts, retry-safe generation, exports, ownership and stale facts 
     const bDocument = await b.from("purchase_documents").insert({ user_id: credentials.b.id, purchase_id: bPurchaseId, document_type: "RECEIPT", original_filename: "foreign.png", storage_path: bEvidencePath, mime_type: "image/png", size_bytes: png.length }).select("id").single();
     expect(bDocument.error).toBeNull();
     const foreignSave = await page.request.post(api, { data: { ...create, requestId: randomUUID(), facts: { ...facts, evidenceIds: [bDocument.data!.id] } } });
-    expect(foreignSave.status()).toBe(400);
+    expect(foreignSave.status()).toBe(409);
+    expect((await foreignSave.json()).code).toBe("MISSING_EVIDENCE");
     evidencePath = `${credentials.a.id}/${purchaseId}/${randomUUID()}.png`;
     expect((await a.storage.from("purchase-evidence").upload(evidencePath, png, { contentType: "image/png" })).error).toBeNull();
     const document = await a.from("purchase_documents").insert({ user_id: credentials.a.id, purchase_id: purchaseId, document_type: "RECEIPT", original_filename: "proof.png", storage_path: evidencePath, mime_type: "image/png", size_bytes: png.length }).select("id").single();
@@ -164,7 +184,7 @@ test("private drafts, retry-safe generation, exports, ownership and stale facts 
     expect((await a.from("complaint_versions").select("id").eq("complaint_id", evidenceDraft.id)).data).toEqual([]);
     expect((await a.from("purchase_documents").delete().eq("id", document.data!.id).select("id")).data).toHaveLength(1);
     const deletedEvidenceGeneration = await page.request.post(api, { data: { operation: "generate", complaintId: evidenceDraft.id, expectedVersion: 1, requestId: randomUUID() } });
-    expect(deletedEvidenceGeneration.status()).toBe(400);
+    expect(deletedEvidenceGeneration.status()).toBe(409);
     expect((await a.from("complaint_versions").select("id").eq("complaint_id", evidenceDraft.id)).data).toEqual([]);
     await a.from("complaints").delete().eq("id", evidenceDraft.id);
 
@@ -227,6 +247,82 @@ test("private drafts, retry-safe generation, exports, ownership and stale facts 
     if (bPurchaseId) await b.from("purchases").delete().eq("id", bPurchaseId);
     await a.from("purchases").delete().eq("id", purchaseId);
     await a.auth.signOut(); await b.auth.signOut();
+  }
+});
+
+test("mobile internal navigation retains unsaved complaint facts until explicit discard", async ({ page }) => {
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  const a = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  expect((await a.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const purchaseId = randomUUID();
+  const complaintId = randomUUID();
+  const purchaseDate = localDate(4), receivedDate = localDate(3), discovered = localDate(2), today = localDate(0);
+  try {
+    const created = await a.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id, product_name: "Bandomoji kėdė", seller_name: "Bandymų parduotuvė", purchase_date: purchaseDate, received_date: receivedDate, purchase_channel: "DISTANCE" }).select("updated_at").single();
+    expect(created.error).toBeNull();
+    const facts = { consumerName: "Senas Vardas", consumerEmail: "old@example.test", sellerName: "Bandymų parduotuvė", sellerContact: "", productName: "Bandomoji kėdė", purchaseDate, receivedDate, purchaseChannel: "DISTANCE", referenceNumber: "", priceCents: null, documentDate: today, defectDescription: "Kėdės koja yra sulūžusi.", defectDiscoveredAt: discovered, reductionCents: null, reductionExplanation: "", physicalReason: null, confirmedNotMinor: false, alternativeProof: "", evidenceIds: [] };
+    const answers = { buyerType: "CONSUMER", sellerType: "PROFESSIONAL", transactionKind: "GOODS", goodsConditionAtSale: "NEW", purchasedAt: purchaseDate, deliveredAt: receivedDate, defectDetectedAt: discovered, apparentCause: "NORMAL_USE_OR_UNKNOWN_DEFECT", purchaseEvidence: "INVOICE", writtenSellerContact: "NO" };
+    expect((await a.from("complaints").insert({ id: complaintId, user_id: credentials.a.id, purchase_id: purchaseId, family: "DEFECTIVE_PRODUCT", request_id: randomUUID(), answers, facts, remedy: "REPAIR", purchase_updated_at: created.data!.updated_at, template_version: "test", source_version: "test" })).error).toBeNull();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await login(page, credentials.a);
+    await page.goto(`/purchases/${purchaseId}/complaints/${complaintId}`);
+    await page.getByLabel("Vardas ir pavardė").fill("Mano Vardas");
+    page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("neišsaugotų pakeitimų"); await dialog.dismiss(); });
+    await page.getByRole("link", { name: "← Pirkinys" }).click();
+    await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}/complaints/${complaintId}$`));
+    await expect(page.getByLabel("Vardas ir pavardė")).toHaveValue("Mano Vardas");
+    page.once("dialog", async (dialog) => { await dialog.accept(); });
+    await page.getByRole("link", { name: "← Pirkinys" }).click();
+    await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}$`));
+  } finally {
+    await a.from("purchases").delete().eq("id", purchaseId);
+    await a.auth.signOut();
+  }
+});
+
+test("signed generation waits for an evidence deletion transaction and rejects its tombstone", async ({ page }) => {
+  test.setTimeout(60_000);
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  const a = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  expect((await a.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const purchaseId = randomUUID(), documentId = randomUUID();
+  const path = `${credentials.a.id}/${purchaseId}/${documentId}.png`;
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9w3ZkAAAAASUVORK5CYII=", "base64");
+  const purchaseDate = localDate(4), receivedDate = localDate(3), discovered = localDate(2), today = localDate(0);
+  let locker: ReturnType<typeof spawn> | undefined;
+  try {
+    const purchase = await a.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id, product_name: "Bandymo kėdė", seller_name: "Bandymų parduotuvė", purchase_date: purchaseDate, received_date: receivedDate, purchase_channel: "DISTANCE" }).select("updated_at").single();
+    expect(purchase.error).toBeNull();
+    expect((await a.storage.from("purchase-evidence").upload(path, png, { contentType: "image/png" })).error).toBeNull();
+    expect((await a.from("purchase_documents").insert({ id: documentId, user_id: credentials.a.id, purchase_id: purchaseId, document_type: "RECEIPT", original_filename: "race.png", storage_path: path, mime_type: "image/png", size_bytes: png.length })).error).toBeNull();
+    await login(page, credentials.a);
+    const facts = { consumerName: "Jūratė Bandymų", consumerEmail: "jurate@example.test", sellerName: "Bandymų parduotuvė", sellerContact: "", productName: "Bandymo kėdė", purchaseDate, receivedDate, purchaseChannel: "DISTANCE", referenceNumber: "", priceCents: null, documentDate: today, defectDescription: "Kėdės koja yra sulūžusi.", defectDiscoveredAt: discovered, reductionCents: null, reductionExplanation: "", physicalReason: null, confirmedNotMinor: false, alternativeProof: "", evidenceIds: [documentId] };
+    const answers = { buyerType: "CONSUMER", sellerType: "PROFESSIONAL", transactionKind: "GOODS", goodsConditionAtSale: "NEW", purchasedAt: purchaseDate, deliveredAt: receivedDate, defectDetectedAt: discovered, apparentCause: "NORMAL_USE_OR_UNKNOWN_DEFECT", purchaseEvidence: "INVOICE", writtenSellerContact: "NO" };
+    const api = `/api/purchases/${purchaseId}/complaints`;
+    const saved = await page.request.post(api, { data: { operation: "save", requestId: randomUUID(), family: "DEFECTIVE_PRODUCT", answers, facts, remedy: "REPAIR" } });
+    expect(saved.status(), await saved.text()).toBe(200);
+    const complaintId = (await saved.json()).id;
+    locker = spawn("docker", ["exec", "-i", "supabase_db_pirkejo-skydas", "psql", "-X", "-qAt", "-U", "postgres", "-d", "postgres"], { stdio: ["pipe", "pipe", "pipe"] });
+    const locked = new Promise<void>((resolve, reject) => {
+      locker!.stdout!.on("data", (chunk: Buffer) => { if (chunk.toString().includes(documentId)) resolve(); });
+      locker!.on("error", reject);
+      locker!.on("exit", (code) => { if (code) reject(new Error(`Lock process exited ${code}`)); });
+    });
+    locker.stdin!.write(`begin; select id from public.purchase_documents where id='${documentId}' for update;\n`);
+    await locked;
+    let completed = false;
+    const generation = page.request.post(api, { data: { operation: "generate", complaintId, expectedVersion: 1, requestId: randomUUID() } }).finally(() => { completed = true; });
+    await page.waitForTimeout(300);
+    expect(completed).toBe(false);
+    locker.stdin!.write(`update public.purchase_documents set upload_state='DELETING' where id='${documentId}'; commit;\n\q\n`);
+    const response = await generation;
+    expect(response.status()).toBe(409);
+    expect((await a.from("complaint_versions").select("id").eq("complaint_id", complaintId)).data).toEqual([]);
+  } finally {
+    locker?.stdin?.write("rollback;\n\q\n"); locker?.kill();
+    await a.storage.from("purchase-evidence").remove([path]);
+    await a.from("purchases").delete().eq("id", purchaseId);
+    await a.auth.signOut();
   }
 });
 

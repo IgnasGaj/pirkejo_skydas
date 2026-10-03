@@ -8,9 +8,9 @@ import { deletePurchaseDocumentRow, deletePurchaseRow, listPurchases, purchaseId
 
 function query(result: { data: unknown; error: Error | null }) {
   const chain = {
-    select: vi.fn(), eq: vi.fn(), order: vi.fn(), limit: vi.fn(), in: vi.fn(), delete: vi.fn(), maybeSingle: vi.fn()
+    select: vi.fn(), eq: vi.fn(), order: vi.fn(), limit: vi.fn(), range: vi.fn(), in: vi.fn(), delete: vi.fn(), maybeSingle: vi.fn()
   };
-  for (const method of ["select", "eq", "order", "limit", "in", "delete"] as const) chain[method].mockReturnValue(chain);
+  for (const method of ["select", "eq", "order", "limit", "range", "in", "delete"] as const) chain[method].mockReturnValue(chain);
   Object.assign(chain, { then: (resolve: (value: typeof result) => void) => Promise.resolve(result).then(resolve) });
   chain.maybeSingle.mockResolvedValue(result);
   const client = createClient<Database>("https://example.supabase.co", "test-key");
@@ -24,8 +24,8 @@ describe("purchase query contracts", () => {
     await listPurchases(client, "owner", 3);
     expect(chain.order).toHaveBeenNthCalledWith(1, "created_at", { ascending: false });
     expect(chain.order).toHaveBeenNthCalledWith(2, "id", { ascending: false });
-    expect(chain.limit).toHaveBeenCalledOnce();
-    expect(chain.limit).toHaveBeenCalledWith(3);
+    expect(chain.range).toHaveBeenCalledOnce();
+    expect(chain.range).toHaveBeenCalledWith(0, 2);
   });
 
   it("loads evidence metadata in one owner-scoped query", async () => {

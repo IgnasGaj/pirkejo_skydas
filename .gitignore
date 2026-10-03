@@ -1,6 +1,7 @@
 node_modules
 .next
 .next-sprint04/
+.next-*/
 *.tsbuildinfo
 .DS_Store
 .env.local

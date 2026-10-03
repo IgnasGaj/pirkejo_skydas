@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { todayInVilnius } from "@/lib/date";
 import { documentTypes, purchaseChannels } from "./types";
+import { MAX_PRICE_CENTS } from "@/features/complaints/limits";
 
 export function parsePriceToCents(value: string): number | null {
   const trimmed = value.trim();
@@ -8,26 +9,27 @@ export function parsePriceToCents(value: string): number | null {
   if (!/^(0|[1-9]\d{0,10})(?:[.,]\d{1,2})?$/.test(trimmed)) throw new Error("Invalid price");
   const [whole, fraction = ""] = trimmed.replace(",", ".").split(".");
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-  if (!Number.isSafeInteger(cents)) throw new Error("Invalid price");
+  if (!Number.isSafeInteger(cents) || cents > MAX_PRICE_CENTS) throw new Error("Invalid price");
   return cents;
 }
 
 const date = z.iso.date();
 const optionalText = (max: number) => z.string().trim().max(max).transform((value) => value || null);
+const singleLine = (max: number) => z.string().trim().min(1).max(max).refine((value) => !/[\r\n\u2028\u2029\u0000-\u001f\u007f]/u.test(value));
 export const loginSchema = z.object({ email: z.email(), password: z.string().min(1) });
 export const registrationSchema = z.object({
   email: z.email(), password: z.string().min(8), confirmPassword: z.string()
 }).refine(({ password, confirmPassword }) => password === confirmPassword, { path: ["confirmPassword"] });
 
 export const purchaseSchema = z.object({
-  productName: z.string().trim().min(1).max(200), sellerName: z.string().trim().min(1).max(200),
+  productName: singleLine(200), sellerName: singleLine(200),
   purchaseDate: date, receivedDate: z.union([date, z.literal("")]).transform((value) => value || null),
   purchaseChannel: z.enum(purchaseChannels),
   price: z.string().transform((value, context) => {
     try { return parsePriceToCents(value); }
     catch { context.addIssue({ code: "custom", message: "Invalid price" }); return z.NEVER; }
   }),
-  referenceNumber: optionalText(200), notes: optionalText(2000)
+  referenceNumber: optionalText(200).refine((value) => !value || !/[\r\n\u2028\u2029\u0000-\u001f\u007f]/u.test(value)), notes: optionalText(2000)
 }).superRefine((value, context) => {
   const today = todayInVilnius();
   if (value.purchaseDate > today) context.addIssue({ code: "custom", path: ["purchaseDate"], message: "Future purchase date" });

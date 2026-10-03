@@ -13,8 +13,8 @@ const suggestions: ReceiptSuggestions = {
   ]
 };
 vi.mock("./ReceiptScanner", () => ({
-  ReceiptScanner: ({ onResult }: { onResult: (result: ReceiptSuggestions) => void }) =>
-    <button type="button" onClick={() => onResult(suggestions)}>Pateikti bandymo OCR</button>
+  ReceiptScanner: ({ file, onResult }: { file: File | null; onResult: (result: ReceiptSuggestions) => void }) =>
+    <><span data-testid="loaded-file">{file?.name ?? "Nėra failo"}</span><button type="button" onClick={() => onResult(suggestions)}>Pateikti bandymo OCR</button></>
 }));
 
 import { ExistingReceiptScanner } from "./ExistingReceiptScanner";
@@ -23,7 +23,7 @@ const purchase: Purchase = {
   id: "purchase", user_id: "owner", product_name: "Sena prekė", seller_name: "Parduotuvė",
   purchase_date: "2026-09-30", received_date: null, purchase_channel: "UNKNOWN",
   price_cents: null, currency: "EUR", reference_number: null, notes: null,
-  created_at: "2026-09-30T12:00:00Z", updated_at: "2026-09-30T12:00:00Z"
+  created_at: "2026-09-30T12:00:00Z", updated_at: "2026-09-30T12:00:00Z", deletion_state: "ACTIVE"
 };
 const document: PurchaseDocument = {
   id: "document", user_id: "owner", purchase_id: "purchase", document_type: "RECEIPT",
@@ -64,4 +64,32 @@ it("clears an OCR price after manual name replacement and preserves a manual pri
   fireEvent.change(price, { target: { value: "4,20" } });
   await user.click(screen.getByRole("button", { name: /Arbata/ }));
   expect(price.value).toBe("4,20");
+});
+
+it("ignores an old fetch after close and starts a clean scan session", async () => {
+  let finishFirst!: (value: unknown) => void;
+  let calls = 0;
+  vi.stubGlobal("fetch", vi.fn(() => {
+    const response = { ok: true, headers: { get: () => "3" }, blob: async () => new Blob(["png"], { type: "image/png" }) };
+    return ++calls === 1 ? new Promise((resolve) => { finishFirst = resolve; }) : Promise.resolve(response);
+  }));
+  const user = userEvent.setup();
+  render(<ExistingReceiptScanner purchase={purchase} document={document} action={async () => ({ error: null })} />);
+  await user.click(screen.getByRole("button", { name: "Nuskaityti čekį" }));
+  await user.click(screen.getByRole("button", { name: "Uždaryti nuskaitymą" }));
+  await user.click(screen.getByRole("button", { name: "Nuskaityti čekį" }));
+  await waitFor(() => expect(screen.getByTestId("loaded-file").textContent).toBe("receipt.png"));
+  finishFirst({ ok: false });
+  await waitFor(() => expect(screen.getByTestId("loaded-file").textContent).toBe("receipt.png"));
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("clears a manually selected price when the scan is closed and reopened", async () => {
+  const user = await review();
+  await user.click(screen.getByRole("button", { name: /Kava · 3\.50 EUR/ }));
+  fireEvent.change(screen.getByLabelText("Siūloma: Prekės kaina (EUR)"), { target: { value: "4,20" } });
+  await user.click(screen.getByRole("button", { name: "Uždaryti nuskaitymą" }));
+  await user.click(screen.getByRole("button", { name: "Nuskaityti čekį" }));
+  await user.click(screen.getByRole("button", { name: "Pateikti bandymo OCR" }));
+  expect(screen.getByLabelText("Siūloma: Prekės kaina (EUR)")).toHaveProperty("value", "");
 });

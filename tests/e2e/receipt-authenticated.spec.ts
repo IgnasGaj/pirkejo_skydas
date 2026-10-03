@@ -63,6 +63,30 @@ test("database claim serializes overlapping receipt saves and preserves bytes", 
   }
 });
 
+test("purchase deletion blocks an in-flight metadata claim from becoming ready", async () => {
+  const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
+  const a = createClient<Database>(credentials.url, credentials.key, { auth: { persistSession: false, autoRefreshToken: false } });
+  expect((await a.auth.signInWithPassword(credentials.a)).error).toBeNull();
+  const purchaseId = randomUUID();
+  const documentId = randomUUID();
+  const path = `${credentials.a.id}/${purchaseId}/${documentId}.png`;
+  const buffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9w3ZkAAAAASUVORK5CYII=", "base64");
+  try {
+    expect((await a.from("purchases").insert({ id: purchaseId, user_id: credentials.a.id, product_name: "Šalinamas čekis", seller_name: "Bandymų parduotuvė", purchase_date: date, purchase_channel: "UNKNOWN" })).error).toBeNull();
+    expect((await a.from("purchase_documents").insert({ id: documentId, user_id: credentials.a.id, purchase_id: purchaseId, document_type: "RECEIPT", original_filename: "race.png", storage_path: path, mime_type: "image/png", size_bytes: buffer.length, upload_state: "PENDING" })).error).toBeNull();
+    expect((await a.from("purchases").update({ deletion_state: "DELETING" }).eq("id", purchaseId)).error).toBeNull();
+    expect((await a.storage.from("purchase-evidence").upload(path, buffer, { contentType: "image/png", upsert: false })).error).not.toBeNull();
+    expect((await a.from("purchase_documents").update({ upload_state: "READY" }).eq("id", documentId)).error).not.toBeNull();
+    const another = await a.from("purchase_documents").insert({ id: randomUUID(), user_id: credentials.a.id, purchase_id: purchaseId, document_type: "RECEIPT", original_filename: "later.png", storage_path: `${credentials.a.id}/${purchaseId}/${randomUUID()}.png`, mime_type: "image/png", size_bytes: buffer.length, upload_state: "PENDING" });
+    expect(another.error).not.toBeNull();
+    expect((await a.from("purchase_documents").select("upload_state").eq("id", documentId)).data).toEqual([{ upload_state: "PENDING" }]);
+  } finally {
+    await a.storage.from("purchase-evidence").remove([path]);
+    await a.from("purchases").delete().eq("id", purchaseId);
+    await a.auth.signOut();
+  }
+});
+
 test("cancelling a real worker scan leaves manual entry usable", async ({ page }) => {
   const credentials = JSON.parse(readFileSync(process.env.E2E_AUTH_CREDENTIALS_FILE!, "utf8")) as Credentials;
   await login(page, credentials.a);

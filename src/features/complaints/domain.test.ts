@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Purchase } from "@/features/purchases/domain/types";
 import { decide, renderLetter, selectEvidence, supportedRequests, validateReviewed, type Facts } from "./domain";
+import { assertDocumentBudget } from "./limits";
 
 const today = "2026-10-02";
 const purchase = {
@@ -29,6 +30,13 @@ const withdrawalAnswers = {
 };
 
 describe("complaint eligibility and canonical Lithuanian letter", () => {
+  it("rejects a valid-character Unicode fact combination before the SQL byte limit", () => {
+    const assessed = decide("DEFECTIVE_PRODUCT", defectAnswers, today)!;
+    expect(() => validateReviewed("DEFECTIVE_PRODUCT", assessed.answers, assessed.decision, "REPAIR", {
+      ...facts, defectDescription: "漢".repeat(4000), reductionExplanation: "漢".repeat(1000), alternativeProof: "漢".repeat(500)
+    }, purchase, today)).toThrow(/per ilgi/);
+    expect(() => assertDocumentBudget("Dokumentas", { text: "ą".repeat(12000) }, 24000)).toThrow(/per ilgi/);
+  });
   it("allows a supported price reduction without a non-minor declaration, but guards termination", () => {
     const secondary = decide("DEFECTIVE_PRODUCT", { ...defectAnswers, writtenSellerContact: "YES", sellerClaim: { receivedAt: "2026-09-26", requestedRemedy: "REPAIR" }, sellerOutcome: "REPAIR_FAILED_OR_DEFECT_RECURRED" }, today)!;
     expect(secondary.decision.code).toBe("SECONDARY_REMEDIES_MAY_BE_AVAILABLE");

@@ -6,10 +6,10 @@ import type { Database, Insert } from "@/lib/supabase/database.types";
 
 type Client = SupabaseClient<Database>;
 
-export async function listPurchases(client: Client, userId: string, limit?: number): Promise<Purchase[]> {
+export async function listPurchases(client: Client, userId: string, limit?: number, offset = 0): Promise<Purchase[]> {
   let query = client.from("purchases").select("*").eq("user_id", userId)
     .order("created_at", { ascending: false }).order("id", { ascending: false });
-  if (limit !== undefined) query = query.limit(limit);
+  if (limit !== undefined) query = query.range(offset, offset + limit - 1);
   const { data, error } = await query;
   if (error) throw error;
   return data ?? [];
@@ -57,8 +57,20 @@ export async function listPurchaseDocuments(client: Client, userId: string, purc
   return data ?? [];
 }
 
+export async function listUnfinishedPurchaseDocuments(client: Client, userId: string, purchaseId: string): Promise<PurchaseDocument[]> {
+  const { data, error } = await client.from("purchase_documents").select("*").eq("user_id", userId).eq("purchase_id", purchaseId).in("upload_state", ["PENDING", "DELETING"]).order("created_at", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function getPurchaseDocument(client: Client, userId: string, purchaseId: string, documentId: string): Promise<PurchaseDocument | null> {
   const { data, error } = await client.from("purchase_documents").select("*").eq("user_id", userId).eq("purchase_id", purchaseId).eq("id", documentId).eq("upload_state", "READY").maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function getDeletablePurchaseDocument(client: Client, userId: string, purchaseId: string, documentId: string): Promise<PurchaseDocument | null> {
+  const { data, error } = await client.from("purchase_documents").select("*").eq("user_id", userId).eq("purchase_id", purchaseId).eq("id", documentId).in("upload_state", ["PENDING", "READY", "DELETING"]).maybeSingle();
   if (error) throw error;
   return data;
 }

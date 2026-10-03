@@ -5,6 +5,7 @@ import { defectiveProductCaseSchema } from "@/features/defective-product/domain/
 import { evaluateDefectiveProductCase } from "@/features/defective-product/domain/evaluateDefectiveProductCase";
 import type { DefectiveProductCaseInput } from "@/features/defective-product/domain/types";
 import type { Purchase, PurchaseDocument } from "@/features/purchases/domain/types";
+import { assertDocumentBudget, MAX_PRICE_CENTS } from "./limits";
 
 export const TEMPLATE_VERSION = "2026-10-03.1";
 export const SOURCE_VERSION = "2026-10-03";
@@ -13,13 +14,13 @@ export type Family = z.infer<typeof familySchema>;
 export const requestSchema = z.enum(["REPAIR", "REPLACEMENT", "PRICE_REDUCTION", "TERMINATION_REFUND", "WITHDRAW", "EXCHANGE", "CONSENT_RETURN"]);
 export type Request = z.infer<typeof requestSchema>;
 const date = z.iso.date();
-const singleLine = (max: number) => z.string().trim().max(max).refine((value) => !/[\r\n\u2028\u2029]/u.test(value), "Vienos eilutės laukelyje negali būti eilučių lūžių.");
+const singleLine = (max: number) => z.string().trim().max(max).refine((value) => !/[\r\n\u2028\u2029\u0000-\u001f\u007f]/u.test(value), "Vienos eilutės laukelyje negali būti eilučių lūžių ar valdymo simbolių.");
 const line = (max: number) => singleLine(max).min(1);
 export const factsSchema = z.object({
   consumerName: line(120), consumerEmail: z.email().max(254), sellerName: line(200),
   sellerContact: singleLine(300).default(""), productName: line(200),
   purchaseDate: date, receivedDate: date.nullable(), purchaseChannel: z.enum(["PHYSICAL_STORE", "DISTANCE"]),
-  referenceNumber: singleLine(200).default(""), priceCents: z.number().int().min(0).max(100_000_000).nullable(),
+  referenceNumber: singleLine(200).default(""), priceCents: z.number().int().min(0).max(MAX_PRICE_CENTS).nullable(),
   documentDate: date, defectDescription: z.string().trim().max(4000).default(""),
   defectDiscoveredAt: date.nullable(), reductionCents: z.number().int().positive().nullable(),
   reductionExplanation: z.string().trim().max(1000).default(""),
@@ -59,6 +60,11 @@ export function supportedRequests(family: Family, decision: { code: string; seco
 }
 
 export function validateReviewed(family: Family, answers: Answers, decision: { code: string; secondaryRemedyGrounds?: string[] }, request: Request, raw: unknown, purchase: Purchase, today: string): Facts {
+  if (purchase.purchase_channel === "UNKNOWN") throw new Error("Pirkinio įraše nurodykite, kaip pirkote prekę, ir pakartokite teisinę patikrą.");
+  if (purchase.price_cents != null && purchase.price_cents > MAX_PRICE_CENTS) throw new Error("Pirkinio kaina viršija 1 000 000 EUR. Pataisykite kainą pirkinio įraše prieš rengdami dokumentą.");
+  for (const [name, value] of [["prekės pavadinimas", purchase.product_name], ["pardavėjo pavadinimas", purchase.seller_name], ["užsakymo numeris", purchase.reference_number ?? ""]]) {
+    if (/[\r\n\u2028\u2029\u0000-\u001f\u007f]/u.test(value)) throw new Error(`Pirkinio lauke „${name}“ yra eilučių lūžių arba valdymo simbolių. Pataisykite jį pirkinio įraše.`);
+  }
   const facts = factsSchema.parse(raw);
   if (!supportedRequests(family, decision).includes(request)) throw new Error("Pasirinktas reikalavimas nepalaikomas. Pakartokite patikrą.");
   if (facts.documentDate > today || facts.documentDate < purchase.purchase_date) throw new Error("Patikrinkite dokumento datą.");
@@ -84,7 +90,9 @@ export function validateReviewed(family: Family, answers: Answers, decision: { c
   }
   if (family === "DISTANCE_WITHDRAWAL" && !facts.receivedDate) throw new Error("Nurodykite prekės gavimo datą.");
   if (request === "EXCHANGE" && !facts.physicalReason) throw new Error("Nurodykite, dėl kurios savybės norite pakeisti prekę.");
-  return request === "PRICE_REDUCTION" ? { ...facts, confirmedNotMinor: false } : facts;
+  const reviewed = request === "PRICE_REDUCTION" ? { ...facts, confirmedNotMinor: false } : facts;
+  assertDocumentBudget("Peržiūrėti faktai", reviewed, 16000);
+  return reviewed;
 }
 
 export type EvidenceSnapshot = Pick<PurchaseDocument, "id" | "original_filename" | "document_type">;

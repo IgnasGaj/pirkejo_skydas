@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import Link from "next/link";
 import type { Purchase, PurchaseDocument } from "@/features/purchases/domain/types";
 import type { Row } from "@/lib/supabase/database.types";
 
@@ -211,4 +212,90 @@ it("requires an older price-reduction draft to be resaved without the obsolete d
   await user.click(screen.getByRole("button", { name: "Išsaugoti juodraštį" }));
   await waitFor(() => expect(submitted).toHaveLength(1));
   expect(submitted[0].facts.confirmedNotMinor).toBe(false);
+});
+
+it("recovers a committed creation with changed facts before applying the edited revision", async () => {
+  const submitted: Array<Record<string, unknown>> = [];
+  let saves = 0;
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: { body: string }) => {
+    if (!options?.body) return { ok: true, json: async () => ({ draft }) };
+    const body = JSON.parse(options.body);
+    submitted.push(body);
+    if (++saves === 1) throw new Error("Ryšys nutrūko.");
+    if (saves === 2) return { ok: false, json: async () => ({ code: "CREATION_CHANGED", error: "Ankstesnis juodraštis jau išsaugotas.", id: draft.id, draft_version: 1 }) };
+    return { ok: true, json: async () => ({ id: draft.id, draft_version: 2 }) };
+  }));
+  const user = userEvent.setup();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialFlow="defect" />);
+  await user.click(screen.getByRole("button", { name: "Patvirtinti patikrą" }));
+  await user.selectOptions(screen.getByLabelText("Vienas prašymas"), "REPAIR");
+  await user.type(screen.getByLabelText("Vardas ir pavardė"), "Senas Vardas");
+  await user.type(screen.getByLabelText("El. paštas"), "old@example.test");
+  await user.type(screen.getByLabelText("Prekės trūkumo aprašymas"), "Kėdės koja yra sulūžusi.");
+  await user.click(screen.getByRole("button", { name: "Išsaugoti juodraštį" }));
+  await waitFor(() => expect(submitted).toHaveLength(1));
+  await user.clear(screen.getByLabelText("Vardas ir pavardė"));
+  await user.type(screen.getByLabelText("Vardas ir pavardė"), "Naujas Vardas");
+  await user.click(screen.getByRole("button", { name: "Išsaugoti juodraštį" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Įkelti išsaugotą versiją" })).toBeTruthy());
+  expect(submitted[1].requestId).toBe(submitted[0].requestId);
+  expect((submitted[1].facts as typeof facts).consumerName).toBe("Naujas Vardas");
+  await user.click(screen.getByRole("button", { name: "Įkelti išsaugotą versiją" }));
+  await user.click(await screen.findByRole("button", { name: "Pritaikyti mano pakeitimus" }));
+  await user.click(screen.getByRole("button", { name: "Išsaugoti juodraštį" }));
+  await waitFor(() => expect(submitted).toHaveLength(3));
+  expect(submitted[2].complaintId).toBe(draft.id);
+  expect(submitted[2].expectedVersion).toBe(1);
+  expect(submitted[2].requestId).not.toBe(submitted[1].requestId);
+  expect((submitted[2].facts as typeof facts).consumerName).toBe("Naujas Vardas");
+  await waitFor(() => expect(push).toHaveBeenCalledWith(`/purchases/${purchase.id}/complaints/${draft.id}`));
+});
+
+it("keeps local edits during a refreshed revision and supports an explicit rebase", async () => {
+  const revised = { ...draft, draft_version: 2, facts: { ...facts, consumerName: "Serverio Vardas" } } as Row<"complaints">;
+  const submitted: Array<Record<string, unknown>> = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, options: { body: string }) => {
+    submitted.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ id: draft.id, draft_version: 3 }) };
+  }));
+  const user = userEvent.setup();
+  const view = render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  await user.clear(screen.getByLabelText("Vardas ir pavardė"));
+  await user.type(screen.getByLabelText("Vardas ir pavardė"), "Mano Vardas");
+  view.rerender(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={revised} />);
+  expect(screen.getByLabelText("Vardas ir pavardė")).toHaveProperty("value", "Mano Vardas");
+  await user.click(screen.getByRole("button", { name: "Pritaikyti mano pakeitimus" }));
+  await user.click(screen.getByRole("button", { name: "Išsaugoti juodraštį" }));
+  await waitFor(() => expect(submitted).toHaveLength(1));
+  expect(submitted[0].expectedVersion).toBe(2);
+  expect((submitted[0].facts as typeof facts).consumerName).toBe("Mano Vardas");
+});
+
+it("deletes after reassessment clears the remedy and ignores invalid editable facts", async () => {
+  const submitted: Array<Record<string, unknown>> = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, options: { body: string }) => {
+    submitted.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ deleted: true }) };
+  }));
+  vi.stubGlobal("confirm", vi.fn(() => true));
+  const user = userEvent.setup();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  await user.click(screen.getByRole("button", { name: "Pakartoti teisinę patikrą" }));
+  await user.click(screen.getByRole("button", { name: "Patvirtinti patikrą" }));
+  await user.clear(screen.getByLabelText("Vardas ir pavardė"));
+  await user.click(screen.getByRole("button", { name: "Ištrinti dokumentą" }));
+  await waitFor(() => expect(submitted).toHaveLength(1));
+  expect(submitted[0].operation).toBe("delete");
+  expect(submitted[0].complaintId).toBe(draft.id);
+});
+
+it("protects an internal exit and retains edited facts when it is cancelled", async () => {
+  vi.stubGlobal("confirm", vi.fn(() => false));
+  const user = userEvent.setup();
+  render(<><Link href="/purchases/other/edit">Redaguoti pirkinį</Link><ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} /></>);
+  await user.clear(screen.getByLabelText("Vardas ir pavardė"));
+  await user.type(screen.getByLabelText("Vardas ir pavardė"), "Mano Vardas");
+  const allowed = fireEvent.click(screen.getByRole("link", { name: "Redaguoti pirkinį" }));
+  expect(allowed).toBe(false);
+  expect(screen.getByLabelText("Vardas ir pavardė")).toHaveProperty("value", "Mano Vardas");
 });

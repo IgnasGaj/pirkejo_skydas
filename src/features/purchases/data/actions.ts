@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requirePurchaseUser } from "./auth";
-import { createPurchase, getPurchaseById, getPurchaseDocument, updatePurchaseIfCurrent } from "./purchases";
+import { createPurchase, getPurchaseById, getDeletablePurchaseDocument, updatePurchaseIfCurrent } from "./purchases";
 import { removeDocument, removePurchaseAndEvidence, saveDocument } from "./document-service";
 import { documentMetadataSchema, extensionForMime, purchaseSchema, validateDocumentFile, verifyFileSignature } from "../domain/validation";
 import type { Purchase, PurchaseDocument } from "../domain/types";
@@ -132,7 +132,7 @@ export async function deleteDocumentAction(purchaseId: string, documentId: strin
   const client = await createClient();
   let document: PurchaseDocument | null;
   try {
-    document = await getPurchaseDocument(client, user.id, purchaseId, documentId);
+    document = await getDeletablePurchaseDocument(client, user.id, purchaseId, documentId);
   } catch (error) {
     console.error("Document lookup failed", error);
     failure(`/purchases/${purchaseId}`, "delete-file-error");

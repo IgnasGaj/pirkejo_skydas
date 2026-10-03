@@ -1,4 +1,4 @@
-// Maintained from local migrations through 20261003020000_complaint_reassessment.sql.
+// Maintained from local migrations through 20261003070000_terminal_evidence_deletion.sql.
 // Regenerate against a migrated local database with:
 // supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts
 export type Database = {
@@ -22,21 +22,21 @@ export type Database = {
           purchase_date: string; received_date: string | null;
           purchase_channel: "PHYSICAL_STORE" | "DISTANCE" | "UNKNOWN";
           price_cents: number | null; currency: "EUR"; reference_number: string | null;
-          notes: string | null; created_at: string; updated_at: string;
+          notes: string | null; created_at: string; updated_at: string; deletion_state: "ACTIVE" | "DELETING";
         };
         Insert: {
           id?: string; user_id: string; product_name: string; seller_name: string;
           purchase_date: string; received_date?: string | null;
           purchase_channel: "PHYSICAL_STORE" | "DISTANCE" | "UNKNOWN";
           price_cents?: number | null; currency?: "EUR"; reference_number?: string | null;
-          notes?: string | null; created_at?: string; updated_at?: string;
+          notes?: string | null; created_at?: string; updated_at?: string; deletion_state?: "ACTIVE" | "DELETING";
         };
         Update: {
           id?: string; user_id?: string; product_name?: string; seller_name?: string;
           purchase_date?: string; received_date?: string | null;
           purchase_channel?: "PHYSICAL_STORE" | "DISTANCE" | "UNKNOWN";
           price_cents?: number | null; currency?: "EUR"; reference_number?: string | null;
-          notes?: string | null; created_at?: string; updated_at?: string;
+          notes?: string | null; created_at?: string; updated_at?: string; deletion_state?: "ACTIVE" | "DELETING";
         };
         Relationships: [];
       };
@@ -45,21 +45,21 @@ export type Database = {
           id: string; user_id: string; purchase_id: string;
           document_type: "RECEIPT" | "INVOICE" | "ORDER_CONFIRMATION" | "WARRANTY_DOCUMENT" | "OTHER";
           original_filename: string; storage_path: string; mime_type: string;
-          size_bytes: number; created_at: string; upload_state: "PENDING" | "READY";
+          size_bytes: number; created_at: string; upload_state: "PENDING" | "READY" | "DELETING";
           content_sha256: string | null; upload_claim_token: string | null; upload_claim_expires_at: string | null;
         };
         Insert: {
           id?: string; user_id: string; purchase_id: string;
           document_type: "RECEIPT" | "INVOICE" | "ORDER_CONFIRMATION" | "WARRANTY_DOCUMENT" | "OTHER";
           original_filename: string; storage_path: string; mime_type: string;
-          size_bytes: number; created_at?: string; upload_state?: "PENDING" | "READY";
+          size_bytes: number; created_at?: string; upload_state?: "PENDING" | "READY" | "DELETING";
           content_sha256?: string | null; upload_claim_token?: string | null; upload_claim_expires_at?: string | null;
         };
         Update: {
           id?: string; user_id?: string; purchase_id?: string;
           document_type?: "RECEIPT" | "INVOICE" | "ORDER_CONFIRMATION" | "WARRANTY_DOCUMENT" | "OTHER";
           original_filename?: string; storage_path?: string; mime_type?: string;
-          size_bytes?: number; created_at?: string; upload_state?: "PENDING" | "READY";
+          size_bytes?: number; created_at?: string; upload_state?: "PENDING" | "READY" | "DELETING";
           content_sha256?: string | null; upload_claim_token?: string | null; upload_claim_expires_at?: string | null;
         };
         Relationships: [{

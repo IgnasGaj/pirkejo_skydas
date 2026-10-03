@@ -25,9 +25,11 @@ try {
   if (!ready) throw new Error("Development server did not become ready");
   assert.equal((await client.auth.signInWithPassword(credentials.a)).error, null);
   const product = `Dev form ${randomUUID()}`;
+  const purchaseDate = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10);
+  const receivedDate = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
   const created = await client.from("purchases").insert({ user_id: credentials.a.id, product_name: product,
-    seller_name: "Bandymų parduotuvė", purchase_date: new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10),
-    purchase_channel: "UNKNOWN" }).select("id").single();
+    seller_name: "Bandymų parduotuvė", purchase_date: purchaseDate, received_date: receivedDate,
+    purchase_channel: "DISTANCE" }).select("*").single();
   assert.equal(created.error, null);
   purchaseId = created.data.id;
   browser = await chromium.launch();
@@ -47,9 +49,20 @@ try {
   await page.getByRole("heading", { name: "Redaguoti pirkinį" }).waitFor();
   assert.equal(await page.getByLabel("Ką pirkote?").inputValue(), product);
   await page.getByLabel("Ką pirkote?").fill(`${product} patikra`);
+  await page.goto(`${base}/purchases/${purchaseId}/complaints/new?flow=defect`);
+  await page.getByRole("heading", { name: "Naujas dokumentas pardavėjui" }).waitFor();
+  const complaintId = randomUUID();
+  const draft = await client.from("complaints").insert({ id: complaintId, user_id: credentials.a.id, purchase_id: purchaseId,
+    family: "DEFECTIVE_PRODUCT", request_id: randomUUID(), answers: { buyerType: "CONSUMER", sellerType: "PROFESSIONAL", transactionKind: "GOODS", goodsConditionAtSale: "NEW", purchasedAt: purchaseDate, deliveredAt: receivedDate, apparentCause: "NORMAL_USE_OR_UNKNOWN_DEFECT", purchaseEvidence: "INVOICE", writtenSellerContact: "NO", asOfDate: new Date().toISOString().slice(0, 10) },
+    facts: { consumerName: "Jūratė Bandymų", consumerEmail: "jurate@example.test", sellerName: "Bandymų parduotuvė", sellerContact: "", productName: product, purchaseDate, receivedDate, purchaseChannel: "DISTANCE", referenceNumber: "", priceCents: null, documentDate: new Date().toISOString().slice(0, 10), defectDescription: "Bandymo metu pastebėtas prekės trūkumas.", defectDiscoveredAt: null, reductionCents: null, reductionExplanation: "", physicalReason: null, confirmedNotMinor: false, alternativeProof: "", evidenceIds: [] },
+    remedy: "REPAIR", purchase_updated_at: created.data.updated_at, template_version: "dev-test", source_version: "dev-test" }).select("id").single();
+  assert.equal(draft.error, null);
+  await page.goto(`${base}/purchases/${purchaseId}/complaints/${complaintId}`);
+  await page.getByRole("heading", { name: "Dokumentas pardavėjui" }).waitFor();
+  assert.equal(await page.getByLabel("Vardas ir pavardė").inputValue(), "Jūratė Bandymų");
   await page.waitForTimeout(500);
   assert.deepEqual(errors, []);
-  process.stdout.write("Authenticated development purchase forms passed.\n");
+  process.stdout.write("Authenticated development purchase and complaint forms passed.\n");
 } finally {
   if (purchaseId) await client.from("purchases").delete().eq("id", purchaseId);
   await client.auth.signOut();
