@@ -29,6 +29,14 @@ export default async function PurchasePage({ params, searchParams }: { params: P
   const purchase = await getPurchaseById(client, user.id, id);
   if (!purchase) notFound();
   const documents = await listPurchaseDocuments(client, user.id, id);
+  const { data: packageRows, error: packagesError } = await client.from("vvtat_packages")
+    .select("id,version_no,request_payload").eq("purchase_id", id).eq("user_id", user.id).limit(1000);
+  if (packagesError) throw new Error("Nepavyko patikrinti parengtų paketų.");
+  const packagesByDocument = new Map<string, number>();
+  for (const pkg of packageRows ?? []) {
+    const selected = (pkg.request_payload as { selected?: Array<{ id?: string }> }).selected ?? [];
+    for (const entry of selected) if (entry.id) packagesByDocument.set(entry.id, (packagesByDocument.get(entry.id) ?? 0) + 1);
+  }
   const unfinishedDocuments = await listUnfinishedPurchaseDocuments(client, user.id, id);
   const { state, documentsPage } = await searchParams;
   const page = Math.min(10000, Math.max(1, Number.parseInt(documentsPage ?? "1", 10) || 1));
@@ -60,7 +68,7 @@ export default async function PurchasePage({ params, searchParams }: { params: P
       {documents.length > 0 && <ul className="mt-7 space-y-4">{documents.map((document) => {
         const access = `/api/purchases/${id}/documents/${document.id}/access`;
         const previewable = ["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(document.mime_type);
-        return <li key={document.id} className="rounded-2xl border border-slate-200 p-5"><p className="font-semibold">{documentLabels[document.document_type]}</p><p className="mt-1 break-all text-sm text-slate-700">{document.original_filename}</p><p className="mt-1 text-xs text-slate-500">{(document.size_bytes / 1024 / 1024).toFixed(2)} MB · {new Date(document.created_at).toLocaleDateString("lt-LT")}</p><div className="mt-4 flex flex-wrap items-center gap-4">{previewable && <a href={access} target="_blank" rel="noopener noreferrer" className="min-h-11 content-center font-semibold text-teal-800 underline">Peržiūrėti</a>}<a href={`${access}?download=1`} className="min-h-11 content-center font-semibold text-teal-800 underline">Atsisiųsti</a><ConfirmDelete action={deleteDocumentAction.bind(null, id, document.id)} label="Pašalinti" title="Pašalinti failą?" description="Šio veiksmo atšaukti nepavyks." /></div>{document.document_type === "RECEIPT" && ["image/jpeg", "image/png", "image/webp"].includes(document.mime_type) && <ExistingReceiptScanner purchase={purchase} document={document} action={applyReceiptCorrections.bind(null, id, document.id)} />}</li>;
+        return <li key={document.id} className="rounded-2xl border border-slate-200 p-5"><p className="font-semibold">{documentLabels[document.document_type]}</p><p className="mt-1 break-all text-sm text-slate-700">{document.original_filename}</p><p className="mt-1 text-xs text-slate-500">{(document.size_bytes / 1024 / 1024).toFixed(2)} MB · {new Date(document.created_at).toLocaleDateString("lt-LT")}</p><div className="mt-4 flex flex-wrap items-center gap-4">{previewable && <a href={access} target="_blank" rel="noopener noreferrer" className="min-h-11 content-center font-semibold text-teal-800 underline">Peržiūrėti</a>}<a href={`${access}?download=1`} className="min-h-11 content-center font-semibold text-teal-800 underline">Atsisiųsti</a><ConfirmDelete action={deleteDocumentAction.bind(null, id, document.id)} label="Pašalinti" title="Pašalinti failą?" description={packagesByDocument.has(document.id) ? `Failas pasirinktas ${packagesByDocument.get(document.id)} parengtuose paketuose. Jų ZIP nebegalės būti atsisiųstas, kol failas nepasiekiamas. Failas bus pašalintas.` : "Šio veiksmo atšaukti nepavyks."} /></div>{document.document_type === "RECEIPT" && ["image/jpeg", "image/png", "image/webp"].includes(document.mime_type) && <ExistingReceiptScanner purchase={purchase} document={document} action={applyReceiptCorrections.bind(null, id, document.id)} />}</li>;
       })}</ul>}
     </section>
     <section className="mt-8 rounded-3xl border border-teal-200 bg-teal-50 p-6 sm:p-8"><h2 className="text-xl font-bold">Reikia pagalbos su šiuo pirkiniu?</h2><div className="mt-5 flex flex-wrap gap-3"><Link href={`/returns?purchaseId=${id}`} className="inline-flex min-h-12 items-center rounded-xl bg-teal-800 px-5 font-semibold text-white">Ar galiu grąžinti?</Link><Link href={`/defective-product?purchaseId=${id}`} className="inline-flex min-h-12 items-center rounded-xl border border-teal-700 px-5 font-semibold text-teal-900">Prekė sugedo</Link></div></section>

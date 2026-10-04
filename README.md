@@ -9,7 +9,7 @@ Use Node.js 22 LTS and npm 10 or newer.
 1. Install dependencies: `npm ci`.
 2. Create a Supabase project. Copy its Project URL and publishable key from the project's Connect or API settings page.
 3. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Seller-document generation also requires the private `COMPLAINT_SIGNING_KEY` described below. The web app does not need a service-role key.
-4. Link the project with `supabase link --project-ref <project-ref>`. Review `supabase config diff` and apply the local callback allowlist with `supabase config push`. Review pending migrations with `supabase migration list --linked` and `supabase db push --linked --dry-run`, then apply them with `supabase db push --linked`. Apply all twelve migrations in timestamp order before running the updated app.
+4. Link the project with `supabase link --project-ref <project-ref>`. Review `supabase config diff` and apply the local callback allowlist with `supabase config push`. Review pending migrations with `supabase migration list --linked` and `supabase db push --linked --dry-run`, then apply them with `supabase db push --linked`. Apply all fifteen migrations in timestamp order before running the updated app.
 5. In Authentication → Providers, enable Email/password. Choose whether email confirmation is required. If it is, configure the confirmation email template for SSR with a link to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email` instead of the default confirmation URL. Set the Authentication site URL to your app origin (for local development, `http://localhost:3000`). The local `/auth/confirm` callback is listed in `supabase/config.toml`; add the production origin and callback before deploying.
 6. Run `npm run dev` and open `http://localhost:3000`.
 
@@ -27,7 +27,7 @@ Sprint 5.3 adds five migrations after that revision: `20261003030000_purchase_co
 
 The server reruns the legal engine using the current Vilnius date and validates the owned purchase, reviewed facts, remedy, and selected evidence. Generation uses a signed request inside a database transaction that locks the draft and purchase, checks their current versions and READY evidence, and allocates the next version number. Stable request UUIDs make draft creation and generation retry safe. A changed purchase or draft requires renewed review. Generated versions retain the exact facts, decision, attachment descriptions, template/source versions, canonical sections, and text that were approved then; later edits or evidence deletion never rewrite them. Attachment descriptions do not grant access to removed files. Draft and version reads use owner-only RLS; downloads check the parent and version and return `private, no-store`. The PDF is generated on demand from saved sections using the bundled, licensed Lato font; UTF-8 text and copy use the saved canonical text. The user sends the document and attachments to the seller separately. Generating, copying, or downloading does not record sending.
 
-`src/lib/supabase/database.types.ts` reflects all twelve local migrations. For deployment, review the pending migrations and provision the matching private key before switching the app to a shared backend; this repository has not applied Sprint 5 migrations to a shared or production project.
+`src/lib/supabase/database.types.ts` reflects the local migration contracts. For deployment, review the pending migrations and provision the matching private key before switching the app to a shared backend; this repository has not applied Sprint 5 migrations to a shared or production project.
 
 ## Case tracking (Sprint 6)
 
@@ -39,11 +39,19 @@ From a generated seller document version, **Sekti kreipimąsi** starts a prepare
 
 The response-date reminder is limited to defect complaints with a user-confirmed seller receipt date. It uses the current verified Article 21 and Civil Code term rules, with Lithuanian public holidays; other document families show an explanation instead of a guessed date. The source and rule record is in [case tracking legal sources](docs/case-tracking-legal-sources.md). These are in-app reminders only; the app does not send the document or contact the seller.
 
+## VVTAT preparation packages (Sprint 7)
+
+An owned tracked defective-product case now has **Parengti dokumentų paketą VVTAT**. The user reviews the pinned seller document, states the dispute and requested outcome, answers routing questions, chooses original evidence and confirms a final review. An incomplete version may still be saved with its missing and review items. Other complaint families show an unsupported explanation. Saved versions contain the exact case revision, all journal events, the pinned complaint version, reviewed input and selected evidence metadata; a later case edit does not rewrite them. The package is preparation material, not an official form or a submission. Follow the [source record](docs/vvtat-package-legal-sources.md) and current VVTAT/VTIS instructions for manual submission.
+
+Apply `20261004020000_vvtat_packages.sql`, then `20261004030000_vvtat_package_validation.sql`, then `20261004040000_vvtat_version_sequence.sql` after the two Sprint 6 migrations. These add owner-only package reads, exact request replay, atomic snapshotting, immutable versions and monotonically allocated version numbers. The app uses authenticated RPCs and the existing private Storage bucket; no service-role application key or new secret is required. Whole-case and purchase deletion cascade package metadata; selected evidence may still be deleted independently, after a warning, and then ZIP export fails honestly. Package deletion affects only the selected version.
+
+Private PDF and ZIP downloads verify ownership and current evidence metadata. ZIP generation downloads only the explicitly chosen READY originals, checks actual sizes and SHA-256, and includes a Lithuanian summary, both canonical seller-document exports, an attachment index and manual instructions. It generates no duplicate Storage objects. App limits are 20 files, 50 MiB of original evidence and 60 MiB final ZIP; these are app resource budgets, not VTIS limits. The server permits two concurrent exports per process and buffers a bounded archive in memory before sending a success response, so capacity planning should allow roughly 150 MiB transient memory per export. Evidence remains in the private purchase vault. The supported PDF uses up to 120 pages; oversized history produces an actionable error. Source verification does not extend the existing case clock past 2026-10-31.
+
 ### Phone preview on a trusted Wi-Fi
 
 Find the computer's active Wi-Fi IPv4 address, then run `LOCAL_DEV_HOSTNAME=<that-ip> npm run dev -- --hostname 0.0.0.0 --port 3000` on a free port. Open `http://<that-ip>:3000` on the phone and `http://localhost:3000` on the computer. `LOCAL_DEV_HOSTNAME` adds only that host to Next.js development origins; it is optional if the browser does not encounter a development-origin restriction. Keep the computer awake. The phone must use the same trusted Wi-Fi; firewall rules or router client isolation can block access. Do not open router ports for this preview.
 
-For authenticated phone use, the backend must have all **twelve** migrations and be reachable from the phone. A `NEXT_PUBLIC_SUPABASE_URL` using `localhost` or `127.0.0.1` on the computer points to the phone itself in browser calls and will not work there; use an authorized reachable development endpoint. Auth confirmation redirects must allow the exact phone origin and `/auth/confirm` callback, or use an already confirmed account. Local HTTP can limit camera and other secure-context browser features. Test file selection and scanning on the actual phone before relying on them.
+For authenticated phone use, the backend must have all **fifteen** migrations and be reachable from the phone. A `NEXT_PUBLIC_SUPABASE_URL` using `localhost` or `127.0.0.1` on the computer points to the phone itself in browser calls and will not work there; use an authorized reachable development endpoint. Auth confirmation redirects must allow the exact phone origin and `/auth/confirm` callback, or use an already confirmed account. Local HTTP can limit camera and other secure-context browser features. Test file selection and scanning on the actual phone before relying on them.
 
 ## Receipt scanning
 
@@ -82,13 +90,13 @@ The `tests/e2e/ocr.spec.ts` browser test runs the **real** Tesseract worker agai
 
 If another `next dev` process is running in the same checkout, its `.next` output can collide with the production build and cause misleading webpack runtime errors. Stop it temporarily, use an isolated copy, or set `NEXT_DIST_DIR=.next-sprint04` for both `npm run build` and `npm run test:e2e`. CI uses a fresh checkout and runs all checks on pushes and pull requests. Its authenticated production browser suite checks purchase creation and editing; `scripts/check-dev-purchase-forms.mjs` checks purchase and complaint forms with a separate `.next-dev-sprint04` output directory. The `verify` job is the check that can later be made required by branch protection.
 
-Database types in `src/lib/supabase/database.types.ts` were updated to match all twelve local migrations; they have not been compared with a deployed project. After applying migrations to a local Supabase stack, regenerate and review them with:
+Database types in `src/lib/supabase/database.types.ts` were updated against local migration output through the fifteenth migration; they have not been compared with a deployed project. After applying migrations to a local Supabase stack, regenerate and review them with:
 
 ```bash
 supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts
 ```
 
-The current type file preserves the SQL checks' literal values for purchase channel, document type, and currency. Review generated differences against the migration before committing them.
+The current type file preserves the SQL checks' literal values for purchase channel, document type, and currency and disallows direct package writes in the app type surface. Review generated differences against the migration before committing them.
 
 ### Dependency audit
 
@@ -106,7 +114,7 @@ Use a disposable, migrated local or dedicated test Supabase project and two ordi
 
 An issued signed URL is a temporary bearer link and generally remains usable until expiry; test unauthorized issuance and direct Storage access separately. Unit and credential-free browser smoke tests do not prove live RLS.
 
-The opt-in `npm run test:e2e:auth` runs sequentially against **local** Supabase only. It covers the two-account purchase lifecycle, a concurrent database claim, real scan-assisted save and cancellation, a forced upload conflict followed by attachment retry, private receipt loading, selected corrections, stale or deleted-document rejection, a near-15 MiB upload, and PDF manual fallback. CI starts a disposable local Supabase stack and creates two ordinary accounts with email confirmation disabled only in its temporary checkout. For a manual run, start the local stack with `supabase start` and apply all twelve migrations. Create and confirm two ordinary test accounts, A and B, using the public client or the app; local confirmation mail is at `http://127.0.0.1:54324`. Put a JSON file outside Git with this shape:
+The opt-in `npm run test:e2e:auth` runs sequentially against **local** Supabase only. It covers the two-account purchase lifecycle, a concurrent database claim, real scan-assisted save and cancellation, a forced upload conflict followed by attachment retry, private receipt loading, selected corrections, stale or deleted-document rejection, a near-15 MiB upload, PDF manual fallback, and the reviewed VVTAT ZIP path. CI starts a disposable local Supabase stack and creates two ordinary accounts with email confirmation disabled only in its temporary checkout. For a manual run, start the local stack with `supabase start` and apply all fifteen migrations. Create and confirm two ordinary test accounts, A and B, using the public client or the app; local confirmation mail is at `http://127.0.0.1:54324`. Put a JSON file outside Git with this shape:
 
 ```json
 {

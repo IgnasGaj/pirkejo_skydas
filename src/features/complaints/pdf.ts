@@ -28,8 +28,8 @@ function wrapLine(line: string, font: PDFFont, width: number): string[] {
   return result;
 }
 
-export async function renderComplaintPdf(sections: string[]): Promise<Uint8Array> {
-  if (sections.length > 24 || sections.join("\n").length > 24000) throw new Error("Document too large");
+async function renderPdf(sections: string[], limits: { sections: number; characters: number; pages: number; title: string }): Promise<Uint8Array> {
+  if (sections.length > limits.sections || sections.join("\n").length > limits.characters) throw new Error("Document too large");
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const fontBytes = await readFile(path.join(process.cwd(), "assets/fonts/Lato-Regular.ttf"));
@@ -39,7 +39,10 @@ export async function renderComplaintPdf(sections: string[]): Promise<Uint8Array
   for (const section of sections) {
     for (const inputLine of section.split("\n")) {
       for (const line of wrapLine(inputLine, font, PAGE_WIDTH - MARGIN * 2)) {
-        if (y < MARGIN + LINE_HEIGHT * 2) { page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]); y = PAGE_HEIGHT - MARGIN; }
+        if (y < MARGIN + LINE_HEIGHT * 2) {
+          if (pdf.getPageCount() >= limits.pages) throw new Error("Document page limit reached");
+          page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]); y = PAGE_HEIGHT - MARGIN;
+        }
         if (line) page.drawText(line, { x: MARGIN, y, size: FONT_SIZE, font, color: rgb(0.12, 0.16, 0.20) });
         y -= LINE_HEIGHT;
       }
@@ -50,7 +53,15 @@ export async function renderComplaintPdf(sections: string[]): Promise<Uint8Array
   for (let i = 0; i < pages.length; i++) {
     pages[i].drawText(`${i + 1} / ${pages.length}`, { x: PAGE_WIDTH - MARGIN - 32, y: MARGIN / 2, size: 8, font, color: rgb(0.4, 0.45, 0.5) });
   }
-  pdf.setTitle("Dokumentas pardavėjui");
+  pdf.setTitle(limits.title);
   pdf.setCreator("Pirkėjo Skydas");
   return pdf.save();
+}
+
+export async function renderComplaintPdf(sections: string[]): Promise<Uint8Array> {
+  return renderPdf(sections, { sections: 24, characters: 24000, pages: 40, title: "Dokumentas pardavėjui" });
+}
+
+export async function renderPreparationPdf(sections: string[]): Promise<Uint8Array> {
+  return renderPdf(sections, { sections: 16, characters: 150000, pages: 120, title: "Ginčo rengimo santrauka" });
 }

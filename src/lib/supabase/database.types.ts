@@ -1,9 +1,21 @@
-// Maintained from local migrations through 20261004010000_case_audit_fixes.sql.
+// Maintained from local migrations through 20261004040000_vvtat_version_sequence.sql.
 // Regenerate against a migrated local database with:
 // supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts
 export type Database = {
   public: {
     Tables: {
+      vvtat_package_counters: {
+        Row: { case_id: string; last_version: number };
+        Insert: Record<never, never>;
+        Update: Record<never, never>;
+        Relationships: [{ foreignKeyName: "vvtat_package_counters_case_id_fkey"; columns: ["case_id"]; isOneToOne: true; referencedRelation: "cases"; referencedColumns: ["id"] }];
+      };
+      vvtat_packages: {
+        Row: { id: string; user_id: string; purchase_id: string; case_id: string; complaint_version_id: string; version_no: number; request_id: string; request_payload: Json; case_revision: number; snapshot: Json; created_at: string };
+        Insert: Record<never, never>;
+        Update: Record<never, never>;
+        Relationships: [{ foreignKeyName: "vvtat_packages_case_id_user_id_purchase_id_complaint_versi_fkey"; columns: ["case_id", "user_id", "purchase_id", "complaint_version_id"]; isOneToOne: false; referencedRelation: "cases"; referencedColumns: ["id", "user_id", "purchase_id", "complaint_version_id"] }];
+      };
       case_creation_receipts: {
         Row: { user_id: string; request_id: string; complaint_version_id: string; case_id: string; purchase_id: string; created_at: string };
         Insert: Record<never, never>;
@@ -97,6 +109,8 @@ export type Database = {
     };
     Views: Record<never, never>;
     Functions: {
+      create_vvtat_package: { Args: { p_case_id: string; p_expected_revision: number; p_request_id: string; p_payload: Json }; Returns: Database["public"]["Tables"]["vvtat_packages"]["Row"] };
+      delete_vvtat_package: { Args: { p_package_id: string }; Returns: boolean };
       create_tracked_case: { Args: { p_version_id: string; p_request_id: string }; Returns: Database["public"]["Tables"]["cases"]["Row"] };
       record_case_event: { Args: { p_case_id: string; p_request_id: string; p_expected_revision: number; p_kind: string; p_occurred_on: string; p_payload: Json; p_evidence_id?: string | null; p_target_event_id?: string | null }; Returns: Database["public"]["Tables"]["cases"]["Row"] };
       delete_tracked_case: { Args: { p_case_id: string; p_expected_revision: number; p_request_id: string }; Returns: boolean };
