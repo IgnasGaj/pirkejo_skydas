@@ -58,8 +58,28 @@ test("prepares a reviewed, pinned package and downloads verified originals", asy
     await page.getByLabel("Ar šiam ginčui gali būti taikoma speciali ginčų institucija?").selectOption("NO");
     await page.getByText("originalas.pdf").locator("..", { has: page.locator("input[type=checkbox]") }).locator("input[type=checkbox]").check();
     await page.getByLabel("Peržiūrėjau santrauką, savo nurodytus faktus, pasirinktus failus ir trūkstamus duomenis.").check();
+    const sent: unknown[] = [];
+    let dropFirstResponse = true;
+    await page.route(`**/api/cases/${caseId}/vvtat`, async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      sent.push(JSON.parse(route.request().postData()!));
+      if (dropFirstResponse) {
+        dropFirstResponse = false;
+        const saved = await route.fetch();
+        expect(saved.ok()).toBe(true);
+        await route.abort("failed");
+      } else await route.continue();
+    });
     await page.getByRole("button", { name: "Parengti paketo versiją" }).click();
+    await expect(page.getByText("Ryšys nutrūko.", { exact: false })).toBeVisible();
+    await page.getByLabel("Ginčo esmė").fill("Naujesnis neišsaugotas aprašymas.");
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.getByRole("button", { name: "Pakartoti tą patį išsaugojimą" }).click();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
+    await expect(page.getByLabel("Ginčo esmė")).toHaveValue("Naujesnis neišsaugotas aprašymas.");
     await expect(page.getByText("Versija 1 ·", { exact: false })).toBeVisible();
+    expect((await a.from("vvtat_packages").select("id").eq("case_id", caseId)).data).toHaveLength(1);
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "Atsisiųsti dokumentų paketą ZIP" }).click();
     const archive = unzipSync(new Uint8Array(readFileSync(await (await download).path())));
@@ -69,6 +89,17 @@ test("prepares a reviewed, pinned package and downloads verified originals", asy
     const selected = archive["irodymai/01-originalas.pdf"];
     expect(selected).toEqual(bytes);
     expect(strFromU8(archive["priedu-sarasas.txt"])).toContain(hash);
+    expect((await a.rpc("record_case_event", { p_case_id: caseId, p_request_id: randomUUID(), p_expected_revision: 1,
+      p_kind: "RESPONSE_RECORDED", p_occurred_on: today, p_payload: { outcome: "OTHER", summary: "Naujas įrašas", note: "" } })).error).toBeNull();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("Kreipimosi eiga pasikeitė nuo paketo parengimo.", { exact: false })).toBeVisible();
+    expect((await a.storage.from("purchase-evidence").remove([path])).error).toBeNull();
+    expect((await a.from("purchase_documents").delete().eq("id", evidenceId)).error).toBeNull();
+    const failedExport = page.waitForResponse((response) => response.url().includes(`/vvtat/`) && response.url().includes("format=zip"));
+    await page.getByRole("button", { name: "Atsisiųsti dokumentų paketą ZIP" }).click();
+    expect((await failedExport).status()).toBe(409);
+    await expect(page.getByText("Paketas parengtas, atsisiuntimas nepavyko.", { exact: false })).toBeVisible();
+    expect((await a.from("vvtat_packages").select("id").eq("case_id", caseId)).data).toHaveLength(1);
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   } finally {
