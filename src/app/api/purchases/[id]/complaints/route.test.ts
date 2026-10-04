@@ -87,7 +87,8 @@ it("wraps a purchase lookup exception in a private service response", async () =
 
 it("deletes without remedy or valid reviewed facts", async () => {
   const maybeSingle = vi.fn().mockResolvedValue({ data: { id: "44444444-4444-4444-8444-444444444444" }, error: null });
-  createClient.mockResolvedValue({ from: () => ({ delete: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ select: () => ({ maybeSingle }) }) }) }) }) }) });
+  const casesQuery = { eq() { return this; }, limit: async () => ({ data: [], error: null }) };
+  createClient.mockResolvedValue({ from: (table: string) => table === "cases" ? { select: () => casesQuery } : { delete: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ select: () => ({ maybeSingle }) }) }) }) }) } });
   const response = await POST(request({ operation: "delete", requestId: base.requestId, complaintId: "44444444-4444-4444-8444-444444444444", facts: { consumerName: "" } }), context);
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ deleted: true });

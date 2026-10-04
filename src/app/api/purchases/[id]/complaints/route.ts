@@ -72,6 +72,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const input = payload.data;
     if (input.operation === "delete") {
       if (!input.complaintId) return errorResponse("Dokumentas nerastas.", 404);
+      const tracked = await client.from("cases").select("id").eq("complaint_id", input.complaintId).eq("purchase_id", id).eq("user_id", user.id).limit(1);
+      if (tracked.error) throw tracked.error;
+      if (tracked.data?.length) return errorResponse("Šio dokumento versija susieta su kreipimusi. Pirmiausia aiškiai ištrinkite kreipimosi sekimą.", 409, "TRACKED_DOCUMENT", { caseId: tracked.data[0].id });
       const { data, error } = await client.from("complaints").delete().eq("id", input.complaintId).eq("purchase_id", id).eq("user_id", user.id).select("id").maybeSingle();
       if (error) throw error;
       return data ? NextResponse.json({ deleted: true }, { headers }) : errorResponse("Dokumentas nerastas.", 404);

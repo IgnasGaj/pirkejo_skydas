@@ -22,6 +22,10 @@ export default async function ComplaintPage({ params, searchParams }: { params: 
   ]);
   if (draftError || versionsError) throw new Error("Nepavyko įkelti dokumento istorijos.");
   if (!draft) notFound();
+  const versionIds = (versions ?? []).map((version) => version.id);
+  const tracked = versionIds.length ? await client.from("cases").select("id,complaint_version_id").eq("user_id", user.id).eq("purchase_id", id).in("complaint_version_id", versionIds) : { data: [], error: null };
+  if (tracked.error) throw new Error("Nepavyko įkelti kreipimųsi.");
+  const caseByVersion = Object.fromEntries((tracked.data ?? []).map((item) => [item.complaint_version_id, item.id]));
   const currentFiles = new Map(documents.map((document) => [document.id, document]));
   const historicalIds = [...new Set((versions ?? []).flatMap((version) => {
     const snapshot = version.snapshot as { evidence?: Array<{ id?: string }> };
@@ -35,5 +39,5 @@ export default async function ComplaintPage({ params, searchParams }: { params: 
       return [documentId, error ? "Laikinai nepasiekiamas" : "Galimas"] as const;
     } catch { return [documentId, "Laikinai nepasiekiamas"] as const; }
   })));
-  return <main className="mx-auto max-w-4xl px-5 py-10 sm:px-8"><Link href={`/purchases/${id}`} className="text-sm font-semibold text-teal-800">← Pirkinys</Link><h1 className="my-7 text-3xl font-bold">Dokumentas pardavėjui</h1><ComplaintComposer key={draft.id} purchase={purchase} documents={documents} initialDraft={draft} versions={(versions ?? []).slice(0, 20)} attachmentAvailability={attachmentAvailability} /><nav className="mt-5 flex gap-4 text-teal-800">{page > 1 && <Link href={`?page=${page - 1}`}>← Naujesnės versijos</Link>}{(versions?.length ?? 0) > 20 && <Link href={`?page=${page + 1}`}>Senesnės versijos →</Link>}</nav></main>;
+  return <main className="mx-auto max-w-4xl px-5 py-10 sm:px-8"><Link href={`/purchases/${id}`} className="text-sm font-semibold text-teal-800">← Pirkinys</Link><h1 className="my-7 text-3xl font-bold">Dokumentas pardavėjui</h1><ComplaintComposer key={draft.id} purchase={purchase} documents={documents} initialDraft={draft} versions={(versions ?? []).slice(0, 20)} attachmentAvailability={attachmentAvailability} caseByVersion={caseByVersion} /><nav className="mt-5 flex gap-4 text-teal-800">{page > 1 && <Link href={`?page=${page - 1}`}>← Naujesnės versijos</Link>}{(versions?.length ?? 0) > 20 && <Link href={`?page=${page + 1}`}>Senesnės versijos →</Link>}</nav></main>;
 }

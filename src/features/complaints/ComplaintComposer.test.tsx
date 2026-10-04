@@ -11,6 +11,7 @@ const push = vi.fn();
 const replace = vi.fn();
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace, refresh }) }));
+vi.mock("@/features/cases/actions", () => ({ createCaseAction: vi.fn() }));
 const assessmentAnswers = {
   buyerType: "CONSUMER", sellerType: "PROFESSIONAL", transactionKind: "GOODS", goodsConditionAtSale: "NEW",
   purchasedAt: "2026-09-20", deliveredAt: "2026-09-22", defectDetectedAt: "2026-09-25",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Row } from "@/lib/supabase/database.types";
@@ -13,6 +13,8 @@ import { todayInVilnius } from "@/lib/date";
 import { createBrowserUuid } from "@/lib/browser-uuid";
 import { decide, renderLetter, selectEvidence, supportedRequests, validateReviewed, type Answers, type Facts, type Family, type Request } from "./domain";
 import { legalSources } from "@/legal/sources";
+import { createCaseAction } from "@/features/cases/actions";
+import { useUnsavedNavigationGuard } from "@/lib/useUnsavedNavigationGuard";
 
 type Complaint = Row<"complaints">;
 type Version = Row<"complaint_versions">;
@@ -24,19 +26,7 @@ const requestLabels: Record<Request, string> = {
 const familyLabels: Record<Family, string> = {
   DEFECTIVE_PRODUCT: "Nekokybiška prekė", DISTANCE_WITHDRAWAL: "Nuotolinės sutarties atsisakymas", PHYSICAL_RETURN_REQUEST: "Prašymas dėl kokybiškos prekės"
 };
-// Hash entries may have no state of their own when Next remounts the same route.
-const mountedGuardByRoute = new Map<string, string>();
-function storedGuard(key: string): string | null {
-  try { return window.sessionStorage.getItem(key); } catch { return null; }
-}
-function rememberGuard(key: string, id: string) {
-  try { window.sessionStorage.setItem(key, id); } catch { /* History state still protects this visit. */ }
-}
-function forgetGuard(key: string) {
-  try { window.sessionStorage.removeItem(key); } catch { /* Storage may be disabled. */ }
-}
-
-export function ComplaintComposer({ purchase, documents, initialDraft, versions = [], initialFlow, attachmentAvailability = {} }: { purchase: Purchase; documents: PurchaseDocument[]; initialDraft?: Complaint; versions?: Version[]; initialFlow?: string; attachmentAvailability?: Record<string, string> }) {
+export function ComplaintComposer({ purchase, documents, initialDraft, versions = [], initialFlow, attachmentAvailability = {}, caseByVersion = {} }: { purchase: Purchase; documents: PurchaseDocument[]; initialDraft?: Complaint; versions?: Version[]; initialFlow?: string; attachmentAvailability?: Record<string, string>; caseByVersion?: Record<string, string> }) {
   const router = useRouter();
   const [flow, setFlow] = useState<"defect" | "return" | null>(initialDraft ? null : initialFlow === "defect" ? "defect" : initialFlow === "return" ? "return" : null);
   const [family, setFamily] = useState<Family | null>(initialDraft?.family ?? null);
@@ -67,24 +57,8 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
   const [remoteDraft, setRemoteDraft] = useState<Complaint | null>(null);
   const [reviewRecovery, setReviewRecovery] = useState(false);
   const [today, setToday] = useState(todayInVilnius);
-  const allowLeave = useRef(false);
-  const leaveAttempt = useRef(0);
-  const historyGuardRef = useRef<{ route: string; href: string; id: string } | null>(null);
-  const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
-  function markEdited() { leaveAttempt.current += 1; allowLeave.current = false; setLocalRevision((revision) => revision + 1); }
-  function releaseGuard() {
-    const route = window.location.pathname + window.location.search;
-    mountedGuardByRoute.delete(route);
-    forgetGuard(`complaint-leave:${route}`);
-  }
-  function beginLeaving() {
-    const attempt = ++leaveAttempt.current;
-    allowLeave.current = true;
-    releaseGuard();
-    // A cancelled or failed navigation must not grant a lasting unload bypass.
-    window.setTimeout(() => { if (leaveAttempt.current === attempt) allowLeave.current = false; }, 2000);
-  }
+  const { releaseGuard, resetLeaveOnEdit } = useUnsavedNavigationGuard(dirty);
+  function markEdited() { resetLeaveOnEdit(); setLocalRevision((revision) => revision + 1); }
   const purchaseChanged = Boolean(initialDraft && boundPurchaseVersion !== purchase.updated_at);
   const discoveryChanged = family === "DEFECTIVE_PRODUCT" && facts.defectDiscoveredAt !== ((answers as DefectiveProductCaseInput | null)?.defectDetectedAt ?? null);
   const needsReassessment = (purchaseChanged && !reassessed) || discoveryChanged;
@@ -124,89 +98,6 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
     // The saved version is the revision boundary; local edits stay untouched.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDraft?.id, initialDraft?.draft_version]);
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => { if (allowLeave.current) { allowLeave.current = false; return; } event.preventDefault(); event.returnValue = ""; };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
-  useEffect(() => {
-    const state = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
-    const route = window.location.pathname + window.location.search;
-    const storageKey = `complaint-leave:${route}`;
-    const current = state(window.history.state);
-    // React StrictMode runs setup/cleanup/setup. Reclaim that entry instead of pushing twice.
-    const onGuard = current.complaintLeaveSlot === route && typeof current.complaintLeaveId === "string";
-    const onBase = current.complaintLeaveBaseRoute === route && typeof current.complaintLeaveBase === "string";
-    const strictReuse = historyGuardRef.current?.route === route && historyGuardRef.current.href === window.location.href && !onBase;
-    const remountId = !onBase ? mountedGuardByRoute.get(route) : undefined;
-    const reloadedId = !onBase && performance.getEntriesByType("navigation").some((entry) => (entry as PerformanceNavigationTiming).type === "reload")
-      ? storedGuard(storageKey) : null;
-    const hashId = current.complaintLeaveHashRoute === route && typeof current.complaintLeaveHashId === "string"
-      ? current.complaintLeaveHashId as string : window.location.hash ? remountId ?? reloadedId ?? undefined : undefined;
-    const sentinel = strictReuse ? historyGuardRef.current!.id : onGuard ? current.complaintLeaveId as string : onBase ? current.complaintLeaveBase as string
-      : hashId ?? remountId ?? reloadedId ?? `complaint-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
-    historyGuardRef.current = { route, href: window.location.href, id: sentinel };
-    mountedGuardByRoute.set(route, sentinel);
-    rememberGuard(storageKey, sentinel);
-    if (strictReuse || onGuard || ((remountId || reloadedId) && !hashId)) {
-      window.history.replaceState({ ...current, complaintLeaveId: sentinel, complaintLeaveSlot: route, complaintLeaveSentinel: sentinel }, "", window.location.href);
-    } else if (hashId) {
-      window.history.replaceState({ ...current, complaintLeaveHashId: sentinel, complaintLeaveHashRoute: route }, "", window.location.href);
-    } else {
-      const baseState = { ...current };
-      delete baseState.complaintLeaveBase;
-      delete baseState.complaintLeaveBaseRoute;
-      delete baseState.complaintLeaveId;
-      delete baseState.complaintLeaveSlot;
-      delete baseState.complaintLeaveSentinel;
-      delete baseState.complaintLeaveHashId;
-      delete baseState.complaintLeaveHashRoute;
-      if (!onBase) window.history.replaceState({ ...baseState, complaintLeaveBase: sentinel, complaintLeaveBaseRoute: route }, "", window.location.href);
-      window.history.pushState({ ...baseState, complaintLeaveId: sentinel,
-        complaintLeaveSlot: route, complaintLeaveSentinel: sentinel }, "", window.location.href);
-    }
-    const intercept = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !(event.target instanceof Element)) return;
-      const link = event.target.closest("a[href]") as HTMLAnchorElement | null;
-      if (!link || link.hasAttribute("download") || (link.target && link.target.toLowerCase() !== "_self")) return;
-      if (link.origin === window.location.origin && link.pathname === window.location.pathname && link.search === window.location.search) return;
-      if (dirtyRef.current && !window.confirm("Yra neišsaugotų pakeitimų. Išeiti ir juos atmesti?")) { event.preventDefault(); return; }
-      // Replace the guard entry on a link exit, so returning to this form has one entry.
-      event.preventDefault();
-      if (link.origin === window.location.origin) { releaseGuard(); router.replace(link.href); }
-      else { beginLeaving(); window.location.replace(link.href); }
-    };
-    const onBack = (event: PopStateEvent) => {
-      // Hash Back/Forward and unrelated traversal never land on this guard's base.
-      if (state(event.state).complaintLeaveBase !== sentinel) return;
-      if (dirtyRef.current && !window.confirm("Yra neišsaugotų pakeitimų. Išeiti ir juos atmesti?")) {
-        window.history.forward();
-        return;
-      }
-      beginLeaving();
-      window.history.back();
-    };
-    document.addEventListener("click", intercept, true);
-    window.addEventListener("popstate", onBack);
-    return () => {
-      document.removeEventListener("click", intercept, true); window.removeEventListener("popstate", onBack);
-      if (window.location.pathname + window.location.search !== route) mountedGuardByRoute.delete(route);
-      const latest = state(window.history.state);
-      if (latest.complaintLeaveSentinel === sentinel) {
-        const rest = { ...latest };
-        delete rest.complaintLeaveSentinel;
-        window.history.replaceState(rest, "", window.location.href);
-      } else if (latest.complaintLeaveHashId === sentinel) {
-        const rest = { ...latest };
-        delete rest.complaintLeaveHashId;
-        delete rest.complaintLeaveHashRoute;
-        window.history.replaceState(rest, "", window.location.href);
-      }
-    };
-  // One sentinel for the mounted composer, regardless of edit/save cycles.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   async function loadLatest() {
     const id = recoveredDraft?.id ?? initialDraft?.id;
     if (!id) return;
@@ -296,14 +187,14 @@ export function ComplaintComposer({ purchase, documents, initialDraft, versions 
     <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7"><h2 className="text-xl font-bold">Oficialūs šaltiniai</h2><ul className="mt-3 space-y-2 text-sm">{(family === "DEFECTIVE_PRODUCT" ? ["VVTAT_GUARANTEES", "VVTAT_CLAIMS", "LT_CIVIL_CODE"] : family === "DISTANCE_WITHDRAWAL" ? ["VVTAT_FAQ", "LT_CIVIL_CODE"] : ["VVTAT_GUARANTEES", "LT_RETAIL_RULES"]).map((key) => <li key={key}><a className="text-teal-800 underline" href={legalSources[key as keyof typeof legalSources].url} target="_blank" rel="noopener noreferrer">{legalSources[key as keyof typeof legalSources].title}</a></li>)}</ul></section>
     {error && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-900">{error}</p>}{status && <p role="status" className="rounded-xl bg-teal-50 p-4 text-sm text-teal-950">{status}</p>}
     <div className="flex flex-wrap gap-3">{initialDraft && <a href="#reviewed-facts" className="min-h-12 content-center rounded-xl border border-slate-300 px-5 font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700">Redaguoti juodraštį</a>}<button type="button" disabled={busy || reviewRecovery || !saveRequestId || needsReassessment || !preview} onClick={() => submit("save")} className="min-h-12 rounded-xl border border-teal-700 px-5 font-semibold text-teal-900 disabled:opacity-50">Išsaugoti juodraštį</button>{initialDraft && <button type="button" disabled={busy || !generateRequestId || needsReassessment || dirty || !preview} onClick={() => submit("generate")} className="min-h-12 rounded-xl bg-teal-800 px-5 font-semibold text-white disabled:opacity-50">{versions.length ? "Parengti naują versiją" : "Patvirtinti ir parengti dokumentą"}</button>}{initialDraft && <button type="button" disabled={busy || !saveRequestId} onClick={() => { if (window.confirm("Ištrinti dokumentą ir visas jo versijas?")) submit("delete"); }} className="min-h-12 rounded-xl border border-rose-300 px-5 font-semibold text-rose-800">Ištrinti dokumentą</button>}</div>
-    {initialDraft && <section className="space-y-4"><h2 className="text-xl font-bold">Parengtos versijos</h2>{versions.length === 0 && <p className="text-sm text-slate-600">Dar nėra parengto dokumento.</p>}{versions.map((version) => <SavedVersion key={version.id} purchaseId={purchase.id} complaintId={initialDraft.id} version={version} attachmentAvailability={attachmentAvailability} />)}</section>}
+    {initialDraft && <section className="space-y-4"><h2 className="text-xl font-bold">Parengtos versijos</h2>{versions.length === 0 && <p className="text-sm text-slate-600">Dar nėra parengto dokumento. Pirmiausia parenkite dokumentą.</p>}{versions.map((version) => <SavedVersion key={version.id} purchaseId={purchase.id} complaintId={initialDraft.id} version={version} attachmentAvailability={attachmentAvailability} caseId={caseByVersion[version.id]} />)}</section>}
   </fieldset>;
 }
 
-function SavedVersion({ purchaseId, complaintId, version, attachmentAvailability }: { purchaseId: string; complaintId: string; version: Version; attachmentAvailability: Record<string, string> }) {
+function SavedVersion({ purchaseId, complaintId, version, attachmentAvailability, caseId }: { purchaseId: string; complaintId: string; version: Version; attachmentAvailability: Record<string, string>; caseId?: string }) {
   const [copied, setCopied] = useState("");
   const historicalEvidence = (version.snapshot as { evidence?: Array<{ id?: string; original_filename?: string }> }).evidence;
   const base = `/api/purchases/${purchaseId}/complaints/${complaintId}/versions/${version.id}`;
   async function copy() { try { await navigator.clipboard.writeText(version.plain_text); setCopied("Tekstas nukopijuotas."); } catch { setCopied("Nepavyko nukopijuoti. Pažymėkite tekstą žemiau ir nukopijuokite patys."); } }
-  return <article className="rounded-2xl border border-slate-200 bg-white p-5"><h3 className="font-bold">Versija {version.version_no} · {new Date(version.generated_at).toLocaleString("lt-LT")}</h3><p className="mt-2 text-sm text-slate-600">Ši versija saugo tuo metu peržiūrėtus faktus. Dabartinių teisių ji nepatvirtina.</p>{Array.isArray(historicalEvidence) && historicalEvidence.length > 0 && <div className="mt-3 text-sm"><p className="font-semibold">Dabartinė priedų būsena:</p><ul>{historicalEvidence.map((item) => <li key={item.id} className="break-all">{item.original_filename}: {item.id ? attachmentAvailability[item.id] ?? "Laikinai nepasiekiamas" : "Laikinai nepasiekiamas"}</li>)}</ul></div>}<div className="mt-4 flex flex-wrap gap-3"><a className="min-h-11 content-center rounded-xl bg-teal-800 px-4 text-sm font-semibold text-white" href={`${base}?format=pdf`}>Atsisiųsti PDF</a><a className="min-h-11 content-center rounded-xl border border-teal-700 px-4 text-sm font-semibold text-teal-900" href={`${base}?format=txt`}>Atsisiųsti tekstą</a><button type="button" onClick={copy} className="min-h-11 rounded-xl border border-teal-700 px-4 text-sm font-semibold text-teal-900">Kopijuoti tekstą</button></div>{copied && <p role="status" className="mt-3 text-sm">{copied}</p>}<details className="mt-4"><summary className="cursor-pointer font-semibold">Peržiūrėti dokumentą</summary><textarea readOnly aria-label={`Versijos ${version.version_no} tekstas`} value={version.plain_text} className="mt-3 min-h-80 w-full resize-y whitespace-pre-wrap rounded-xl border border-slate-300 p-3 font-sans text-sm leading-6" /></details></article>;
+  return <article className="rounded-2xl border border-slate-200 bg-white p-5"><h3 className="font-bold">Versija {version.version_no} · {new Date(version.generated_at).toLocaleString("lt-LT")}</h3><p className="mt-2 text-sm text-slate-600">Ši versija saugo tuo metu peržiūrėtus faktus. Dabartinių teisių ji nepatvirtina.</p>{Array.isArray(historicalEvidence) && historicalEvidence.length > 0 && <div className="mt-3 text-sm"><p className="font-semibold">Dabartinė priedų būsena:</p><ul>{historicalEvidence.map((item) => <li key={item.id} className="break-all">{item.original_filename}: {item.id ? attachmentAvailability[item.id] ?? "Laikinai nepasiekiamas" : "Laikinai nepasiekiamas"}</li>)}</ul></div>}<div className="mt-4 flex flex-wrap gap-3"><a className="min-h-11 content-center rounded-xl bg-teal-800 px-4 text-sm font-semibold text-white" href={`${base}?format=pdf`}>Atsisiųsti PDF</a><a className="min-h-11 content-center rounded-xl border border-teal-700 px-4 text-sm font-semibold text-teal-900" href={`${base}?format=txt`}>Atsisiųsti tekstą</a><button type="button" onClick={copy} className="min-h-11 rounded-xl border border-teal-700 px-4 text-sm font-semibold text-teal-900">Kopijuoti tekstą</button>{caseId ? <Link href={`/cases/${caseId}`} className="min-h-11 content-center rounded-xl border border-teal-700 px-4 text-sm font-semibold text-teal-900">Atidaryti kreipimąsi</Link> : <form action={createCaseAction.bind(null, version.id)}><button type="submit" className="min-h-11 rounded-xl border border-teal-700 px-4 text-sm font-semibold text-teal-900">Sekti kreipimąsi</button></form>}</div>{copied && <p role="status" className="mt-3 text-sm">{copied}</p>}<details className="mt-4"><summary className="cursor-pointer font-semibold">Peržiūrėti dokumentą</summary><textarea readOnly aria-label={`Versijos ${version.version_no} tekstas`} value={version.plain_text} className="mt-3 min-h-80 w-full resize-y whitespace-pre-wrap rounded-xl border border-slate-300 p-3 font-sans text-sm leading-6" /></details></article>;
 }
