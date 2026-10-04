@@ -15,7 +15,7 @@ const credentialsFile = process.env.E2E_AUTH_CREDENTIALS_FILE;
 const localOnly = credentialsFile ? JSON.parse(readFileSync(credentialsFile, "utf8")) as Credentials : null;
 const integration = localOnly && /^http:\/\/127\.0\.0\.1:\d+$/.test(localOnly.url) ? it : it.skip;
 
-function faultyClient(real: SupabaseClient<Database>, options: { failReady?: boolean; failRemoveOnce?: boolean; failDeleteOnce?: boolean;
+function faultyClient(real: SupabaseClient<Database>, options: { failReady?: boolean; failRemoveOnce?: boolean; pretendRemoveOnce?: boolean; failDeleteOnce?: boolean;
   beforeUpload?: () => Promise<void> } = {}) {
   let removeFailed = false, deleteFailed = false;
   const bucket = real.storage.from("purchase-evidence");
@@ -52,8 +52,13 @@ function faultyClient(real: SupabaseClient<Database>, options: { failReady?: boo
           removeFailed = true;
           return Promise.resolve({ data: null, error: new Error("Injected Storage removal failure") });
         }
+        if (options.pretendRemoveOnce && !removeFailed) {
+          removeFailed = true;
+          return Promise.resolve({ data: [], error: null });
+        }
         return bucket.remove(paths);
-      }
+      },
+      list: bucket.list.bind(bucket)
     }; } }
   } as unknown as SupabaseClient<Database>;
 }
@@ -115,6 +120,20 @@ integration("retries metadata deletion after confirmed Storage cleanup", async (
     expect(await test.objectExists()).toBe(false);
     await removeDocument(test.a, test.credentials.a.id, row.data as PurchaseDocument);
     expect((await test.a.from("purchase_documents").select("id").eq("id", test.metadata.id)).data).toEqual([]);
+  } finally { await test.cleanup(); }
+});
+
+integration("retains metadata when Storage returns success without removing its object", async () => {
+  const test = await setup();
+  try {
+    await expect(saveDocument(faultyClient(test.a, { failReady: true, pretendRemoveOnce: true }), test.metadata, test.file))
+      .rejects.toThrow("Document upload cleanup failed");
+    const row = await test.a.from("purchase_documents").select("*").eq("id", test.metadata.id).single();
+    expect(row.data?.upload_state).toBe("DELETING");
+    expect(await test.objectExists()).toBe(true);
+    await removeDocument(test.a, test.credentials.a.id, row.data as PurchaseDocument);
+    expect((await test.a.from("purchase_documents").select("id").eq("id", test.metadata.id)).data).toEqual([]);
+    expect(await test.objectExists()).toBe(false);
   } finally { await test.cleanup(); }
 });
 

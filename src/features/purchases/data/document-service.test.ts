@@ -13,11 +13,12 @@ import { removeDocument, removePurchaseAndEvidence, saveDocument } from "./docum
 const document = { id: "33333333-3333-4333-8333-333333333333", user_id: "owner", purchase_id: "purchase",
   storage_path: "owner/purchase/file.pdf", upload_state: "READY", upload_claim_expires_at: null } as PurchaseDocument;
 type Result = { data?: Record<string, unknown> | null; error: Error | null };
-function client(options: { ready?: Result; mark?: Result; deleteRow?: Result; remove?: ReturnType<typeof vi.fn> } = {}) {
+function client(options: { ready?: Result; mark?: Result; deleteRow?: Result; remove?: ReturnType<typeof vi.fn>; list?: ReturnType<typeof vi.fn> } = {}) {
   const marked: unknown[] = [];
   const deleted: string[] = [];
   const upload = vi.fn().mockResolvedValue({ error: null });
   const storageRemove = options.remove ?? vi.fn().mockResolvedValue({ error: null });
+  const storageList = options.list ?? vi.fn().mockResolvedValue({ data: [], error: null });
   const chain = (operation: "ready" | "mark" | "delete") => ({
     eq: vi.fn().mockReturnThis(), in: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockImplementation(async () => operation === "ready"
@@ -29,8 +30,8 @@ function client(options: { ready?: Result; mark?: Result; deleteRow?: Result; re
     update: (value: { upload_state?: string }) => { marked.push(value); return chain(value.upload_state === "READY" ? "ready" : "mark"); },
     delete: () => { deleted.push("delete"); return chain("delete"); }
   }));
-  return { api: { from, storage: { from: () => ({ upload, remove: storageRemove }) } } as unknown as SupabaseClient<Database>,
-    marked, deleted, upload, storageRemove };
+  return { api: { from, storage: { from: () => ({ upload, remove: storageRemove, list: storageList }) } } as unknown as SupabaseClient<Database>,
+    marked, deleted, upload, storageRemove, storageList };
 }
 beforeEach(() => { vi.clearAllMocks(); mocks.createPurchaseDocument.mockResolvedValue(undefined);
   mocks.deletePurchaseDocumentRow.mockResolvedValue(undefined); mocks.deletePurchaseRow.mockResolvedValue(undefined);
@@ -65,6 +66,14 @@ it("keeps metadata when Storage cleanup succeeds but its row deletion fails", as
   await removeDocument(test.api, "owner", { ...document, upload_state: "DELETING" });
   expect(test.storageRemove).toHaveBeenCalledTimes(2);
   expect(mocks.deletePurchaseDocumentRow).toHaveBeenCalledOnce();
+});
+
+it("keeps retryable metadata when Storage reports success but the object is still listed", async () => {
+  const list = vi.fn().mockResolvedValue({ data: [{ name: "file.pdf" }], error: null });
+  const test = client({ ready: { data: null, error: new Error("READY unavailable") }, list });
+  await expect(saveDocument(test.api, { ...document, document_type: "RECEIPT", original_filename: "file.pdf", mime_type: "application/pdf", size_bytes: 5 }, new File(["%PDF-"], "file.pdf", { type: "application/pdf" }))).rejects.toThrow("Document upload cleanup failed");
+  expect(test.deleted).toHaveLength(0);
+  expect(test.marked).toContainEqual({ upload_state: "DELETING", upload_claim_token: null, upload_claim_expires_at: null });
 });
 
 it("blocks another account before Storage removal and retains an active upload claim", async () => {

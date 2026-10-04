@@ -7,6 +7,7 @@ vi.mock("@/lib/supabase/server", () => ({ getAuthenticatedUser, createClient }))
 vi.mock("@/features/purchases/data/purchases", () => ({ getPurchaseById, listPurchaseDocuments: async () => [] }));
 import { POST } from "./route";
 import { decide, SOURCE_VERSION, TEMPLATE_VERSION } from "@/features/complaints/domain";
+import { todayInVilnius } from "@/lib/date";
 
 const purchase = {
   id: "11111111-1111-4111-8111-111111111111", user_id: "22222222-2222-4222-8222-222222222222",
@@ -34,7 +35,7 @@ function request(body: unknown) { return new NextRequest(`http://localhost/api/p
 beforeEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); getAuthenticatedUser.mockResolvedValue({ id: purchase.user_id }); getPurchaseById.mockResolvedValue(purchase); });
 
 it("deduplicates only an identical creation operation", async () => {
-  const reviewed = decide("DEFECTIVE_PRODUCT", answers, "2026-10-03")!;
+  const reviewed = decide("DEFECTIVE_PRODUCT", answers, todayInVilnius())!;
   const row = { id: "44444444-4444-4444-8444-444444444444", draft_version: 1, purchase_id: purchase.id,
     family: "DEFECTIVE_PRODUCT", remedy: "REPAIR", answers: reviewed.answers, facts,
     purchase_updated_at: purchase.updated_at, template_version: TEMPLATE_VERSION, source_version: SOURCE_VERSION };
