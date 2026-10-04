@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
@@ -73,12 +73,16 @@ local("pins the complete case snapshot, checks owner and evidence, and replays e
     const first = await a.rpc("create_vvtat_package", args);
     expect(first.error).toBeNull();
     expect(first.data?.version_no).toBe(1);
-    const snapshot = first.data!.snapshot as { events: Array<{ kind: string }>; selected: Array<{ sha256: string }> };
+    const snapshot = first.data!.snapshot as { events: Array<{ kind: string }>; selected: Array<{ sha256: string }>;
+      missingItems: string[]; reviewItems: string[]; sourceLimitations: string[] };
     expect(snapshot.events.map((e) => e.kind)).toEqual(["SUBMITTED"]);
     expect(snapshot.selected[0].sha256).toBe(hash);
+    expect(snapshot.reviewItems).toContain("Pardavėjo gavimo data nežinoma.");
+    expect(snapshot.sourceLimitations.join(" ")).toContain("nepatvirtina");
     const archive = unzipSync(await packageZip(a, first.data!));
     expect(archive["irodymai/01-bandymas.pdf"]).toEqual(bytes);
     expect(strFromU8(archive["priedu-sarasas.txt"])).toContain(hash);
+    if (process.env.VVTAT_PDF_QA_PATH) writeFileSync(process.env.VVTAT_PDF_QA_PATH, archive["01-ginco-santrauka.pdf"]);
     expect((await a.rpc("create_vvtat_package", args)).data?.id).toBe(first.data!.id);
     expect((await a.rpc("create_vvtat_package", { ...args, p_payload: { ...payload, disputeSummary: "Kita" } })).error).not.toBeNull();
     expect((await b.from("vvtat_packages").select("id").eq("id", first.data!.id)).data).toEqual([]);

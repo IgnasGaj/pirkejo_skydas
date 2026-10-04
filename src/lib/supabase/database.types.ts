@@ -1,4 +1,4 @@
-// Maintained from local migrations through 20261004040000_vvtat_version_sequence.sql.
+// Maintained from local migrations through 20261004050000_vvtat_snapshot_review.sql.
 // Regenerate against a migrated local database with:
 // supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts
 export type Database = {

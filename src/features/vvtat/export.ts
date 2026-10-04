@@ -4,33 +4,32 @@ import { zipSync, strToU8 } from "fflate";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Row } from "@/lib/supabase/database.types";
 import { renderComplaintPdf, renderPreparationPdf } from "@/features/complaints/pdf";
-import { todayInVilnius } from "@/lib/date";
-import { checklist, chronologyText, MAX_ARCHIVE_BYTES, MAX_EVIDENCE_BYTES, MAX_HISTORY_TEXT,
+import { chronologyText, MAX_ARCHIVE_BYTES, MAX_EVIDENCE_BYTES, MAX_HISTORY_TEXT,
   safeArchiveName, VVTAT_GUIDANCE, VTIS_URL, type PackageSnapshot, type Preparation } from "./domain";
 import { originalDemandFromText } from "./domain";
 
 export class PackageExportError extends Error {}
+const localDateTime = (value: string) => new Date(value).toLocaleString("lt-LT", { timeZone: "Europe/Vilnius" });
 
-function sourceDate(value: string) { return todayInVilnius(new Date(value)); }
 function asSnapshot(pkg: Row<"vvtat_packages">): PackageSnapshot {
   const data = pkg.snapshot as unknown as PackageSnapshot;
-  if (!data || !Array.isArray(data.events) || !Array.isArray(data.selected) || !data.complaintVersion || !data.case)
+  if (!data || !Array.isArray(data.events) || !Array.isArray(data.selected) || !Array.isArray(data.missingItems) ||
+    !Array.isArray(data.reviewItems) || !Array.isArray(data.sourceLimitations) || !data.complaintVersion || !data.case)
     throw new PackageExportError("Paketo duomenys nepasiekiami. Kreipkitės pagalbos.");
   return data;
 }
 function summarySections(pkg: Row<"vvtat_packages">, snapshot: PackageSnapshot) {
   const input = pkg.request_payload as unknown as Preparation;
-  const status = checklist({ item: snapshot.case, preparation: input, today: sourceDate(pkg.created_at), selectedCount: snapshot.selected.length });
   const history = chronologyText(snapshot);
   if (history.length > MAX_HISTORY_TEXT) throw new PackageExportError("Kreipimosi istorija per ilga. Sutrumpinkite ją prieš rengdami naują paketą.");
   const originalDemand = originalDemandFromText(snapshot.complaintVersion.plainText);
   return [
-    `GINČO RENGIMO SANTRAUKA\nPaketo versija: ${pkg.version_no}\nParengta: ${pkg.created_at}\nKreipimosi redakcija: ${pkg.case_revision}\nDokumento versija: ${snapshot.complaintVersion.versionNo} (${snapshot.complaintVersion.generatedAt})`,
+    `GINČO RENGIMO SANTRAUKA\nPaketo versija: ${pkg.version_no}\nParengta: ${localDateTime(pkg.created_at)}\nKreipimosi redakcija: ${pkg.case_revision}\nDokumento versija: ${snapshot.complaintVersion.versionNo} (${localDateTime(snapshot.complaintVersion.generatedAt)})`,
     `Pareiškėjas (naudotojo peržiūrėti duomenys): ${input.applicantName || "Nenurodyta"}\nKontaktas: ${input.applicantEmail || "Nenurodytas"}\nPardavėjas: ${input.sellerName || "Nenurodytas"}\nPardavėjo kontaktas: ${input.sellerContact || "Nenurodytas"}`,
     `Prekė: ${snapshot.purchase.product_name}\nPirkimo data: ${snapshot.purchase.purchase_date}\nPateikta pardavėjui: ${snapshot.case.submitted_on ?? "Neįrašyta"}\nPardavėjas gavo: ${snapshot.case.received_on ?? "Nežinoma"}\nPradinio dokumento reikalavimas: ${originalDemand}`,
     `Naudotojo aprašyta ginčo esmė:\n${input.disputeSummary || "Nenurodyta"}\n\nKreipimosi dėl tolesnės peržiūros priežastis:\n${input.escalationReason || "Nenurodyta"}\n\nDabar prašomas rezultatas:\n${input.requestedOutcome || "Nenurodytas"}${input.outcomeChangedExplanation ? `\nPasikeitimo paaiškinimas: ${input.outcomeChangedExplanation}` : ""}`,
-    `Trūkstami duomenys: ${status.missing.length ? status.missing.join("; ") : "Nenustatyta"}\nPatikrinimo klausimai: ${status.review.length ? status.review.join("; ") : "Nenustatyta"}`,
-    `Šaltinio versija: ${snapshot.sourceVersion}; taisyklės versija: ${snapshot.ruleVersion ?? "neprieinama"}; šablono versija: ${snapshot.templateVersion}. Ši santrauka yra pasirengimo medžiaga, ne oficialus prašymas. Įrašai yra naudotojo pateikti faktai; failai patys savaime neįrodo įvykių. Archyvas nebuvo pateiktas institucijai.`,
+    `Trūkstami duomenys: ${snapshot.missingItems.length ? snapshot.missingItems.join("; ") : "Nenustatyta"}\nPatikrinimo klausimai: ${snapshot.reviewItems.length ? snapshot.reviewItems.join("; ") : "Nenustatyta"}`,
+    `Šaltinio versija: ${snapshot.sourceVersion}; taisyklės versija: ${snapshot.ruleVersion ?? "neprieinama"}; šablono versija: ${snapshot.templateVersion}. Šaltinių ribos: ${snapshot.sourceLimitations.join("; ")}. Ši santrauka yra pasirengimo medžiaga, ne oficialus prašymas. Įrašai yra naudotojo pateikti faktai; failai patys savaime neįrodo įvykių. Archyvas nebuvo pateiktas institucijai.`,
     `VISI KREIPIMOSI EIGOS ĮRAŠAI\nNurodyta įvykio data; skliausteliuose — įrašo laikas. Pataisos paliktos greta pirminių įrašų.\n${history || "Įrašų nėra."}`
   ];
 }
@@ -56,7 +55,7 @@ function localizedHistory(snapshot: PackageSnapshot) {
     const details = Object.entries(payload).map(([key, value]) => `${detailLabels[key] ?? "Papildoma informacija"}: ${detailValues[String(value)] ?? String(value)}`).join("; ");
     const original = event.target_event_id ? eventsById.get(event.target_event_id) : null;
     const correction = original ? `; pataisytas ${original.revision} įrašas (pradinė data ${original.occurred_on}, duomenys: ${Object.entries(original.payload as Record<string, unknown>).map(([key, value]) => `${detailLabels[key] ?? "Papildoma informacija"}: ${detailValues[String(value)] ?? String(value)}`).join("; ")})` : "";
-    return `${event.revision}. ${event.occurred_on} (${event.recorded_at}) — ${eventLabels[event.kind] ?? "Įvykis"}${correction}${details ? `; ${details}` : ""}${event.evidence_filename ? `; įrodymas: ${event.evidence_filename}` : ""}`;
+    return `${event.revision}. ${event.occurred_on} (${localDateTime(event.recorded_at)}) — ${eventLabels[event.kind] ?? "Įvykis"}${correction}${details ? `; ${details}` : ""}${event.evidence_filename ? `; įrodymas: ${event.evidence_filename}` : ""}`;
   }).join("\n");
 }
 
@@ -122,13 +121,12 @@ export async function packageZip(client: SupabaseClient<Database>, pkg: Row<"vvt
     manifest.push(`${selected.ordinal}. ${selected.filename.replace(/[\u0000-\u001f\u007f]/gu, " ")}\nArchyve: ${name}\nPaskirtis: ${purpose}\nSusiję eigos įrašai: ${related.join(", ") || "nenurodyta"}\nID: ${selected.id}\nDydis: ${bytes.length} baitų\nSHA-256: ${hash}`);
   }
   files["priedu-sarasas.txt"] = strToU8(manifest.join("\n\n") + "\n");
-  const status = checklist({ item: snapshot.case, preparation: pkg.request_payload as unknown as Preparation,
-    today: sourceDate(pkg.created_at), selectedCount: snapshot.selected.length });
   files["pateikimo-instrukcija.txt"] = strToU8(
     `Šis dokumentų paketas yra pasirengimo medžiaga. Jis nėra oficialus prašymas ir nebuvo pateiktas VVTAT ar VTIS.\n` +
     `Patikrinkite aktualią tvarką: ${VVTAT_GUIDANCE}\nVTIS: ${VTIS_URL}\n` +
     `Oficialiame kanale patys užpildykite reikalaujamus laukus, pridėkite tinkamus dokumentus, laikykitės tapatybės ir pasirašymo nurodymų ir pateikite prašymą. Nepatikrinta, ar galima įkelti visą ZIP; prireikus rinkitės atskirus failus.\n` +
-    `Trūksta: ${status.missing.join("; ") || "nenustatyta"}.\nPatikrinkite: ${status.review.join("; ") || "nenustatyta"}.\n` +
+    `Trūksta: ${snapshot.missingItems.join("; ") || "nenustatyta"}.\nPatikrinkite: ${snapshot.reviewItems.join("; ") || "nenustatyta"}.\n` +
+    `Šaltinių ribos: ${snapshot.sourceLimitations.join("; ")}.\n` +
     `Šaltinių versija rengimo metu: ${snapshot.sourceVersion}. Senesniame pakete pateikta informacija nėra naujas teisinių šaltinių patikrinimas.\n`
   );
   const estimated = Object.values(files).reduce((sum, bytes) => sum + bytes.length, 0);

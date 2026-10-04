@@ -32,6 +32,7 @@ export type PackageSnapshot = {
   selected: Array<{ id: string; purpose: Preparation["selected"][number]["purpose"]; ordinal: number;
     filename: string; documentType: string; mimeType: string; sizeBytes: number; sha256: string }>;
   sourceVersion: string; ruleVersion: string | null; templateVersion: string;
+  missingItems: string[]; reviewItems: string[]; sourceLimitations: string[];
 };
 
 export function checklist(input: { item: Row<"cases">; preparation: Preparation; today: string; selectedCount: number }) {
