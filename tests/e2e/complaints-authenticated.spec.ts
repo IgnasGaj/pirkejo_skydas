@@ -294,6 +294,7 @@ test("new tabs keep unsaved facts dirty; repeated saves rearm unload and Back; g
     const answers = { buyerType: "CONSUMER", sellerType: "PROFESSIONAL", transactionKind: "GOODS", goodsConditionAtSale: "NEW", purchasedAt: purchaseDate, deliveredAt: receivedDate, defectDetectedAt: discovered, apparentCause: "NORMAL_USE_OR_UNKNOWN_DEFECT", purchaseEvidence: "INVOICE", writtenSellerContact: "NO" };
     expect((await a.from("complaints").insert({ id: complaintId, user_id: credentials.a.id, purchase_id: purchaseId, family: "DEFECTIVE_PRODUCT", request_id: randomUUID(), answers, facts, remedy: "REPAIR", purchase_updated_at: created.data!.updated_at, template_version: "test", source_version: "test" })).error).toBeNull();
     await login(page, credentials.a);
+    const previousUrl = page.url();
     await page.goto(`/purchases/${purchaseId}/complaints/${complaintId}`);
     const name = page.getByLabel("Vardas ir pavardė");
     const generate = page.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" });
@@ -312,6 +313,20 @@ test("new tabs keep unsaved facts dirty; repeated saves rearm unload and Back; g
       await expect(generate).toBeDisabled();
     }
     await expect(page.getByText("Vartotojas: Neišsaugotas Vardas", { exact: false })).toBeVisible();
+    const hashDialogs: string[] = [];
+    const onHashDialog = async (dialog: import("@playwright/test").Dialog) => { hashDialogs.push(dialog.message()); await dialog.dismiss(); };
+    page.on("dialog", onHashDialog);
+    await page.getByRole("link", { name: "Redaguoti juodraštį" }).click();
+    await expect(page).toHaveURL(/#reviewed-facts$/);
+    await page.goBack();
+    await expect(page).not.toHaveURL(/#reviewed-facts$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/#reviewed-facts$/);
+    await page.goBack();
+    await expect(page).not.toHaveURL(/#reviewed-facts$/);
+    page.off("dialog", onHashDialog);
+    expect(hashDialogs).toEqual([]);
+    await expect(name).toHaveValue("Neišsaugotas Vardas");
     page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("neišsaugotų pakeitimų"); await dialog.dismiss(); });
     await page.getByRole("link", { name: "← Pirkinys" }).click();
     await expect(name).toHaveValue("Neišsaugotas Vardas");
@@ -351,6 +366,9 @@ test("new tabs keep unsaved facts dirty; repeated saves rearm unload and Back; g
     expect(generated.error).toBeNull();
     expect(generated.data?.snapshot).toMatchObject({ facts: { consumerName: "Galutinis išsaugotas" } });
     expect(generated.data?.plain_text).toContain("Galutinis išsaugotas");
+    const beforeReloadLength = await page.evaluate(() => history.length);
+    await page.reload();
+    expect(await page.evaluate(() => history.length)).toBe(beforeReloadLength);
     const closingPage = await context.newPage();
     await closingPage.goto(page.url());
     await closingPage.getByLabel("Vardas ir pavardė").fill("Uždarymo bandymas");
@@ -365,7 +383,18 @@ test("new tabs keep unsaved facts dirty; repeated saves rearm unload and Back; g
     await name.fill("Dar vienas neišsaugotas");
     page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("neišsaugotų pakeitimų"); await dialog.accept(); });
     await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => null);
-    await expect(page).not.toHaveURL(new RegExp(`/complaints/${complaintId}$`));
+    await expect(page).toHaveURL(previousUrl);
+    for (let visit = 0; visit < 2; visit++) {
+      await page.goto(`/purchases/${purchaseId}/complaints/${complaintId}`);
+      const openedLength = await page.evaluate(() => history.length);
+      await page.getByRole("link", { name: "← Pirkinys" }).click();
+      await expect(page).toHaveURL(new RegExp(`/purchases/${purchaseId}$`));
+      expect(await page.evaluate(() => history.length)).toBe(openedLength);
+      await page.goBack();
+      await expect(page).toHaveURL(new RegExp(`/complaints/${complaintId}$`));
+      await page.goBack();
+      await expect(page).toHaveURL(previousUrl);
+    }
   } finally {
     await a.from("purchases").delete().eq("id", purchaseId);
     await a.auth.signOut();

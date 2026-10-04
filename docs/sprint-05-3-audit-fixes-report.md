@@ -1,5 +1,7 @@
 # Sprint 5.3 audit follow-up — implementation report
 
+Historical report for the A1–A3 fix. The later [inspection](sprint-05-3-fix-inspection.md) found R1 and R2; see the current [R1/R2 implementation report](sprint-05-3-inspection-follow-up-report.md) for their disposition and verification.
+
 Date: 2026-10-04<br>
 Branch: `feature/sprint-05-3-audit-fixes`<br>
 Audited Sprint 5.3 base: `6635e2676f8e02f67cfb04cb866e44977e796527`<br>

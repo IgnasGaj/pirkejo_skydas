@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type { Purchase } from "@/features/purchases/domain/types";
 
@@ -32,7 +32,13 @@ const base = { operation: "save", requestId: "33333333-3333-4333-8333-3333333333
 const context = { params: Promise.resolve({ id: purchase.id }) };
 function request(body: unknown) { return new NextRequest(`http://localhost/api/purchases/${purchase.id}/complaints`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }); }
 
-beforeEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); getAuthenticatedUser.mockResolvedValue({ id: purchase.user_id }); getPurchaseById.mockResolvedValue(purchase); });
+beforeEach(() => {
+  vi.clearAllMocks(); vi.unstubAllEnvs();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-03T12:00:00Z"));
+  getAuthenticatedUser.mockResolvedValue({ id: purchase.user_id }); getPurchaseById.mockResolvedValue(purchase);
+});
+afterEach(() => vi.useRealTimers());
 
 it("deduplicates only an identical creation operation", async () => {
   const reviewed = decide("DEFECTIVE_PRODUCT", answers, todayInVilnius())!;
@@ -49,6 +55,26 @@ it("deduplicates only an identical creation operation", async () => {
   expect(changed.status).toBe(409);
   expect(await changed.json()).toMatchObject({ code: "CREATION_CHANGED", id: row.id });
   expect(insert).toHaveBeenCalledTimes(2);
+});
+
+it("requires review recovery when the same creation request crosses a Vilnius date boundary", async () => {
+  const firstDay = todayInVilnius();
+  const reviewed = decide("DEFECTIVE_PRODUCT", answers, firstDay)!;
+  const row = { id: "44444444-4444-4444-8444-444444444444", draft_version: 1, purchase_id: purchase.id,
+    family: "DEFECTIVE_PRODUCT", remedy: "REPAIR", answers: reviewed.answers, facts,
+    purchase_updated_at: purchase.updated_at, template_version: TEMPLATE_VERSION, source_version: SOURCE_VERSION };
+  const maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
+  const insert = vi.fn(() => ({ select: () => ({ single: async () => ({ data: null, error: { code: "23505" } }) }) }));
+  createClient.mockResolvedValue({ from: () => ({ insert, select: () => ({ eq: () => ({ eq: () => ({ maybeSingle }) }) }) }) });
+
+  vi.setSystemTime(new Date("2026-10-03T20:59:59Z"));
+  expect(todayInVilnius()).toBe(firstDay);
+  vi.setSystemTime(new Date("2026-10-03T21:00:01Z"));
+  expect(todayInVilnius()).toBe("2026-10-04");
+  const response = await POST(request(base), context);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ code: "CREATION_CHANGED", id: row.id, draft_version: 1 });
+  expect(insert).toHaveBeenCalledOnce();
 });
 
 it("wraps a purchase lookup exception in a private service response", async () => {

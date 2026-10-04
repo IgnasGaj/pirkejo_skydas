@@ -57,10 +57,13 @@ try {
     facts: { consumerName: "Jūratė Bandymų", consumerEmail: "jurate@example.test", sellerName: "Bandymų parduotuvė", sellerContact: "", productName: product, purchaseDate, receivedDate, purchaseChannel: "DISTANCE", referenceNumber: "", priceCents: null, documentDate: new Date().toISOString().slice(0, 10), defectDescription: "Bandymo metu pastebėtas prekės trūkumas.", defectDiscoveredAt: null, reductionCents: null, reductionExplanation: "", physicalReason: null, confirmedNotMinor: false, alternativeProof: "", evidenceIds: [] },
     remedy: "REPAIR", purchase_updated_at: created.data.updated_at, template_version: "dev-test", source_version: "dev-test" }).select("id").single();
   assert.equal(draft.error, null);
+  await page.waitForTimeout(500);
+  const beforeDraftLength = await page.evaluate(() => history.length);
   await page.goto(`${base}/purchases/${purchaseId}/complaints/${complaintId}`);
   await page.getByRole("heading", { name: "Dokumentas pardavėjui" }).waitFor();
   assert.equal(await page.getByLabel("Vardas ir pavardė").inputValue(), "Jūratė Bandymų");
   await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(() => history.length), beforeDraftLength + 2, "StrictMode must install one complaint guard");
   assert.deepEqual(errors, []);
   process.stdout.write("Authenticated development purchase and complaint forms passed.\n");
 } finally {

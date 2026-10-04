@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Link from "next/link";
@@ -7,8 +8,9 @@ import type { Purchase, PurchaseDocument } from "@/features/purchases/domain/typ
 import type { Row } from "@/lib/supabase/database.types";
 
 const push = vi.fn();
+const replace = vi.fn();
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace, refresh }) }));
 const assessmentAnswers = {
   buyerType: "CONSUMER", sellerType: "PROFESSIONAL", transactionKind: "GOODS", goodsConditionAtSale: "NEW",
   purchasedAt: "2026-09-20", deliveredAt: "2026-09-22", defectDetectedAt: "2026-09-25",
@@ -46,7 +48,8 @@ const evidence = {
   content_sha256: null, upload_claim_token: null, upload_claim_expires_at: null
 } as PurchaseDocument;
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); push.mockReset(); refresh.mockReset(); });
+let testPath = 0;
+afterEach(() => { cleanup(); window.history.replaceState(null, "", `/unit-${++testPath}`); window.sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); push.mockReset(); replace.mockReset(); refresh.mockReset(); });
 
 function withoutRandomUuid() {
   let next = 0;
@@ -166,7 +169,7 @@ for (const existing of [false, true]) {
     if (existing) {
       await waitFor(() => expect(screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).matches(":disabled")).toBe(false));
       expect(screen.getByText(/Vartotojas: Senas Vardas/)).toBeTruthy();
-    } else await waitFor(() => expect(push).toHaveBeenCalledWith(`/purchases/${purchase.id}/complaints/${draft.id}`));
+    } else await waitFor(() => expect(replace).toHaveBeenCalledWith(`/purchases/${purchase.id}/complaints/${draft.id}`));
   });
 }
 
@@ -248,7 +251,7 @@ it("recovers a committed creation with changed facts before applying the edited 
   expect(submitted[2].expectedVersion).toBe(1);
   expect(submitted[2].requestId).not.toBe(submitted[1].requestId);
   expect((submitted[2].facts as typeof facts).consumerName).toBe("Naujas Vardas");
-  await waitFor(() => expect(push).toHaveBeenCalledWith(`/purchases/${purchase.id}/complaints/${draft.id}`));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(`/purchases/${purchase.id}/complaints/${draft.id}`));
 });
 
 it("keeps local edits during a refreshed revision and supports an explicit rebase", async () => {
@@ -333,6 +336,7 @@ it("rearms unload and Back after every save and later edit without accumulating 
   const confirm = vi.fn(() => false);
   vi.stubGlobal("confirm", confirm);
   const pushState = vi.spyOn(window.history, "pushState");
+  const forward = vi.spyOn(window.history, "forward").mockImplementation(() => {});
   const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
   const user = userEvent.setup();
   render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
@@ -340,25 +344,69 @@ it("rearms unload and Back after every save and later edit without accumulating 
   const sentinelPushes = () => pushState.mock.calls.filter(([state]) => (state as { complaintLeaveSentinel?: string })?.complaintLeaveSentinel === sentinel).length;
   const initialPushes = sentinelPushes();
   expect(initialPushes).toBe(1);
+  const baseState = { complaintLeaveBase: sentinel };
   for (const name of ["Pirmas Vardas", "Antras Vardas"]) {
     await user.clear(screen.getByLabelText("Vardas ir pavardė"));
     await user.type(screen.getByLabelText("Vardas ir pavardė"), name);
     const unload = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(unload);
     expect(unload.defaultPrevented).toBe(true);
-    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    window.dispatchEvent(new PopStateEvent("popstate", { state: baseState }));
     expect(screen.getByLabelText("Vardas ir pavardė")).toHaveProperty("value", name);
     expect(back).not.toHaveBeenCalled();
+    expect(forward).toHaveBeenCalledTimes(confirm.mock.calls.length);
     await user.click(screen.getByRole("button", { name: "Išsaugoti juodraštį" }));
     await waitFor(() => expect(screen.getByText("Juodraštis išsaugotas.")).toBeTruthy());
     const cleanUnload = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(cleanUnload);
     expect(cleanUnload.defaultPrevented).toBe(false);
   }
-  expect(sentinelPushes()).toBe(initialPushes + 2); // Only cancelled Back attempts rearm this sentinel.
+  expect(sentinelPushes()).toBe(initialPushes); // Cancellation returns to the existing guard entry.
   await user.type(screen.getByLabelText("Vardas ir pavardė"), " trečias");
   confirm.mockReturnValue(true);
-  window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+  window.dispatchEvent(new PopStateEvent("popstate", { state: baseState }));
   expect(back).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).matches(":disabled")).toBe(true);
+});
+
+it("reuses the guard across StrictMode and remounts while preserving other history state", () => {
+  window.history.replaceState({ __NA: true, unrelated: "kept" }, "", "/purchases/example/complaints/example");
+  const pushState = vi.spyOn(window.history, "pushState");
+  const view = render(<StrictMode><ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} /></StrictMode>);
+  expect(pushState).toHaveBeenCalledOnce();
+  const first = window.history.state;
+  expect(first).toMatchObject({ __NA: true, unrelated: "kept", complaintLeaveSentinel: expect.any(String) });
+  view.unmount();
+  expect(window.history.state).toMatchObject({ __NA: true, unrelated: "kept", complaintLeaveSlot: window.location.pathname });
+  expect(window.history.state.complaintLeaveSentinel).toBeUndefined();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  expect(pushState).toHaveBeenCalledOnce();
+  expect(window.history.state.complaintLeaveSentinel).toBe(first.complaintLeaveSentinel);
+});
+
+it("restores the guard after a reload even if hydration replaced its history state", () => {
+  const route = "/purchases/reload/complaints/example";
+  const guardId = "complaint-before-reload";
+  window.history.replaceState({ __NA: true }, "", route);
+  window.sessionStorage.setItem(`complaint-leave:${route}`, guardId);
+  vi.spyOn(performance, "getEntriesByType").mockReturnValue([{ type: "reload" } as unknown as PerformanceEntry]);
+  const pushState = vi.spyOn(window.history, "pushState");
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  expect(pushState).not.toHaveBeenCalled();
+  expect(window.history.state).toMatchObject({ __NA: true, complaintLeaveSentinel: guardId });
+});
+
+it("does not mistake Forward or hash traversal for leaving the guarded form", async () => {
+  const confirm = vi.fn(() => false);
+  vi.stubGlobal("confirm", confirm);
+  const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+  const user = userEvent.setup();
+  render(<ComplaintComposer purchase={purchase} documents={[]} initialDraft={draft} />);
+  await user.type(screen.getByLabelText("Vardas ir pavardė"), " pakeista");
+  const sentinel = window.history.state.complaintLeaveSentinel;
+  window.dispatchEvent(new PopStateEvent("popstate", { state: { complaintLeaveSentinel: sentinel } }));
+  window.dispatchEvent(new PopStateEvent("popstate", { state: { unrelated: "hash-forward" } }));
+  expect(confirm).not.toHaveBeenCalled();
+  expect(back).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Patvirtinti ir parengti dokumentą" }).matches(":disabled")).toBe(true);
 });
