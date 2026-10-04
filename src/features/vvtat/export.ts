@@ -75,6 +75,8 @@ export async function verifyPackageEvidenceMetadata(client: SupabaseClient<Datab
     if (error || !doc || doc.size_bytes !== selected.sizeBytes || doc.content_sha256 !== selected.sha256 ||
       doc.original_filename !== selected.filename)
       throw new PackageExportError("Pasirinktas įrodymas pašalintas arba pasikeitė. Peržiūrėkite failus.");
+    const available = await client.storage.from("purchase-evidence").info(doc.storage_path);
+    if (available.error) throw new PackageExportError("Pasirinktas įrodymas laikinai nepasiekiamas. Bandykite dar kartą.");
   }
 }
 

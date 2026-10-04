@@ -99,6 +99,7 @@ local("pins the complete case snapshot, checks owner and evidence, and replays e
     expect((await a.rpc("create_vvtat_package", { ...args, p_request_id: randomUUID() })).data?.version_no).toBe(4);
     const retained = second.map((result) => result.data!).find((pkg) => pkg.id !== latest.id)!;
     expect((await a.storage.from("purchase-evidence").remove([path])).error).toBeNull();
+    await expect(verifyPackageEvidenceMetadata(a, retained)).rejects.toThrow("nepasiekiamas");
     expect((await a.from("purchase_documents").delete().eq("id", evidenceId)).error).toBeNull();
     await expect(verifyPackageEvidenceMetadata(a, retained)).rejects.toThrow("įrodymas");
     await expect(packageZip(a, retained)).rejects.toThrow("įrodymas");
