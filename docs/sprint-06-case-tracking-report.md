@@ -69,7 +69,7 @@
 | Authenticated development forms | Passed. |
 | `npm audit` | 5 high, 0 critical, confined to developer-tooling packages (`@next/eslint-plugin-next`, `eslint-config-next`, `braces`, `fast-glob`, `micromatch`). |
 | `npm audit --omit=dev` | 0 vulnerabilities. |
-| `git diff --check`, exact fix-branch CI | Diff check and pushed-commit CI to be recorded after final staging and push. |
+| `git diff --check`, exact fix-branch CI | Diff check passed; [run 37215686780](https://github.com/IgnasGaj/pirkejo_skydas/actions/runs/37215686780) passed for the audit-fix code commit `495dcbdc383bf55d87aed148dde9458316e85009`. |
 
 Browser checks use Chromium desktop and a 390 px mobile viewport. Physical iPhone/Safari, Android, and LAN HTTP remain pending because those devices and a reachable local backend were not available for this run. Manual checklist: on each device open a generated document and its case; record submission with unknown receipt, then receipt, response, service and outcome; test Back/Forward and a new tab with unsaved fields, focus after Vilnius midnight, long text wrapping, private PDF/evidence downloads, and evidence upload retry. A viewport emulator does not prove device behavior.
 
@@ -78,4 +78,4 @@ Browser checks use Chromium desktop and a 390 px mobile viewport. Physical iPhon
 - No seller email, delivery detection, push or background reminders, VVTAT package, or eligibility decision was added. The user-reported journal and in-app reminders do not prove seller conduct or legal entitlement.
 - The deadline calculator must be reverified before showing dates beyond 2026-10-31. The journal remains available after that date.
 - Storage and PostgreSQL remain separate systems; pre-existing orphan-reconciliation maintenance advice still applies. No shared or production migration was run.
-- Original feature-branch push and CI succeeded. The audit-fix branch is kept separate from main and production; its final SHA and CI are reported after push.
+- Original feature-branch push and CI succeeded. The audit-fix code commit `495dcbdc383bf55d87aed148dde9458316e85009` passed [exact-commit CI](https://github.com/IgnasGaj/pirkejo_skydas/actions/runs/37215686780). The report update is a separate documentation-only commit; its final SHA and CI are reported with delivery. The fix branch remains separate from main and production.
