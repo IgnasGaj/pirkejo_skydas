@@ -17,7 +17,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ca
   if (!user) return fail("Prisijunkite ir pakartokite veiksmą. Neišsaugotus duomenis gali tekti įvesti iš naujo.", 401, "AUTH_REQUIRED");
   let input: ReturnType<typeof validateCaseEvent>;
   try { input = validateCaseEvent(await request.json(), todayInVilnius()); }
-  catch { return fail("Patikrinkite įvestus duomenis ir datas.", 400, "INVALID_INPUT"); }
+  catch (error) {
+    const tooLong = error instanceof z.ZodError && error.issues.some((issue) => issue.message.startsWith("Įrašas per ilgas"));
+    return fail(tooLong || error instanceof Error && error.message.startsWith("Įrašas per ilgas") ? "Įrašas per ilgas. Sutrumpinkite aprašymą arba pastabą." : "Patikrinkite įvestus duomenis ir datas.", 400, "INVALID_INPUT");
+  }
   const client = await createClient();
   const { data, error } = await client.rpc("record_case_event", {
     p_case_id: caseId, p_request_id: input.requestId, p_expected_revision: input.expectedRevision,
@@ -27,7 +30,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ca
   if (error) {
     if (/Case not found/.test(error.message)) return fail("Kreipimasis nerastas.", 404, "NOT_FOUND");
     if (/Case revision changed|retry differs|correction|transition|already known|before submission/.test(error.message)) return fail("Kreipimasis pasikeitė. Atnaujinkite puslapį ir peržiūrėkite įrašus; jūsų įvesti duomenys išliko.", 409, "STALE_REVISION");
-    if (/date|method|response|payload|too long|limit|promised/.test(error.message)) return fail("Patikrinkite įvestus duomenis ir datas.", 400, "INVALID_INPUT");
+    if (/Invalid event payload size|too long/i.test(error.message)) return fail("Įrašas per ilgas. Sutrumpinkite aprašymą arba pastabą.", 400, "INVALID_INPUT");
+    if (/date|method|response|payload|limit|promised|before|after|reopen|return|closure|resolution|service|argument/i.test(error.message)) return fail("Patikrinkite įvestus duomenis, datas ir įvykių eilę.", 400, "INVALID_INPUT");
     console.error("Case mutation failed", { code: error.code });
     return fail("Nepavyko išsaugoti. Bandykite dar kartą; jūsų įvesti duomenys išliko.", 503, "SERVICE_UNAVAILABLE");
   }

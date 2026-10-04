@@ -24,6 +24,7 @@ describe("seller response period", () => {
   });
   it("withholds dates after the verified source edition", () => {
     expect(responseDeadline({ ...base, receivedOn: "2026-10-20", today: "2026-10-20", sourceValidThrough: "2026-10-31" })).toMatchObject({ state: "UNAVAILABLE" });
+    expect(responseDeadline({ ...base, receivedOn: "2026-10-02", today: "2026-11-01", sourceValidThrough: "2026-10-31" })).toMatchObject({ state: "UNAVAILABLE" });
   });
   it("validates real past civil dates and uses civil days across DST", () => {
     expect(() => assertPastCivilDate("2026-02-30", "2026-10-04")).toThrow();

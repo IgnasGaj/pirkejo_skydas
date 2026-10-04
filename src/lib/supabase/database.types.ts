@@ -1,9 +1,15 @@
-// Maintained from local migrations through 20261004000000_case_tracking.sql.
+// Maintained from local migrations through 20261004010000_case_audit_fixes.sql.
 // Regenerate against a migrated local database with:
 // supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts
 export type Database = {
   public: {
     Tables: {
+      case_creation_receipts: {
+        Row: { user_id: string; request_id: string; complaint_version_id: string; case_id: string; purchase_id: string; created_at: string };
+        Insert: Record<never, never>;
+        Update: Record<never, never>;
+        Relationships: [];
+      };
       case_deletion_receipts: {
         Row: { user_id: string; case_id: string; request_id: string; expected_revision: number; deleted_at: string };
         Insert: Record<never, never>;

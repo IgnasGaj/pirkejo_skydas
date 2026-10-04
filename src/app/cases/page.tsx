@@ -4,6 +4,7 @@ import { requirePurchaseUser } from "@/features/purchases/data/auth";
 import { todayInVilnius } from "@/lib/date";
 import { CASE_RULE_VERSION, CASE_VERIFIED_THROUGH, responseDeadline } from "@/features/cases/domain";
 import type { Family } from "@/features/complaints/domain";
+import { CasesRefresh } from "@/features/cases/CasesRefresh";
 
 export const dynamic = "force-dynamic";
 export default async function CasesPage({ searchParams }: { searchParams: Promise<{ state?: string; page?: string }> }) {
@@ -21,7 +22,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   if (purchases.error) throw new Error("Nepavyko įkelti pirkinio informacijos.");
   const byId = new Map((purchases.data ?? []).map((item) => [item.id, item]));
   const today = todayInVilnius();
-  return <main className="mx-auto max-w-5xl px-5 py-10 sm:px-8"><h1 className="text-3xl font-bold">Mano kreipimaisi</h1><p className="mt-2 text-slate-600">Sekite parengtus dokumentus ir užregistruotą kreipimosi eigą.</p><nav className="mt-6 flex gap-3"><Link href="/cases?state=active" aria-current={filter === "active" ? "page" : undefined} className="rounded-xl border px-4 py-3 font-semibold text-teal-900">Aktyvūs</Link><Link href="/cases?state=closed" aria-current={filter === "closed" ? "page" : undefined} className="rounded-xl border px-4 py-3 font-semibold text-teal-900">Uždaryti</Link></nav><p className="mt-5 text-sm text-slate-600">Rasta: {count ?? 0}</p>
+  return <main className="mx-auto max-w-5xl px-5 py-10 sm:px-8"><CasesRefresh /><h1 className="text-3xl font-bold">Mano kreipimaisi</h1><p className="mt-2 text-slate-600">Sekite parengtus dokumentus ir užregistruotą kreipimosi eigą.</p><nav className="mt-6 flex gap-3"><Link href="/cases?state=active" aria-current={filter === "active" ? "page" : undefined} className="rounded-xl border px-4 py-3 font-semibold text-teal-900">Aktyvūs</Link><Link href="/cases?state=closed" aria-current={filter === "closed" ? "page" : undefined} className="rounded-xl border px-4 py-3 font-semibold text-teal-900">Uždaryti</Link></nav><p className="mt-5 text-sm text-slate-600">Rasta: {count ?? 0}</p>
     {(rows ?? []).length === 0 ? <p className="mt-6 rounded-2xl bg-white p-6">Kreipimųsi šiame sąraše nėra. <Link href="/purchases" className="text-teal-800 underline">Atidarykite pirkinį</Link> ir parenkite dokumentą.</p> : <ul className="mt-5 space-y-4">{(rows ?? []).map((item) => {
       const purchase = byId.get(item.purchase_id);
       const calculated = responseDeadline({ family: item.family as Family, submittedOn: item.submitted_on, receivedOn: item.received_on, substantiveResponse: item.has_substantive_response, today, sourceValidThrough: CASE_VERIFIED_THROUGH });
