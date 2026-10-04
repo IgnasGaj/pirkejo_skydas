@@ -10,6 +10,7 @@ import { channelLabels, documentLabels, documentTypes } from "@/features/purchas
 import { z } from "zod";
 import { ExistingReceiptScanner } from "@/features/receipts/components/ExistingReceiptScanner";
 import { applyReceiptCorrections } from "@/features/receipts/data/actions";
+import type { Row } from "@/lib/supabase/database.types";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +30,17 @@ export default async function PurchasePage({ params, searchParams }: { params: P
   const purchase = await getPurchaseById(client, user.id, id);
   if (!purchase) notFound();
   const documents = await listPurchaseDocuments(client, user.id, id);
-  const { data: packageRows, error: packagesError } = await client.from("vvtat_packages")
-    .select("id,version_no,request_payload").eq("purchase_id", id).eq("user_id", user.id).limit(1000);
-  if (packagesError) throw new Error("Nepavyko patikrinti parengtų paketų.");
+  const packageRows: Array<Pick<Row<"vvtat_packages">, "id" | "version_no" | "request_payload">> = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error: packagesError } = await client.from("vvtat_packages")
+      .select("id,version_no,request_payload").eq("purchase_id", id).eq("user_id", user.id)
+      .order("id", { ascending: true }).range(offset, offset + 999);
+    if (packagesError) throw new Error("Nepavyko patikrinti parengtų paketų.");
+    packageRows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
   const packagesByDocument = new Map<string, number>();
-  for (const pkg of packageRows ?? []) {
+  for (const pkg of packageRows) {
     const selected = (pkg.request_payload as { selected?: Array<{ id?: string }> }).selected ?? [];
     for (const entry of selected) if (entry.id) packagesByDocument.set(entry.id, (packagesByDocument.get(entry.id) ?? 0) + 1);
   }
