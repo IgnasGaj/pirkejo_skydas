@@ -48,3 +48,7 @@ The attached [specification](sprint-05-3-project-hardening.md) was copied into `
 | `npm audit` / `npm audit --omit=dev` | Five high development-package entries / zero production entries. Full audit remains open. |
 
 The prior Sprint 5.2 exact-commit CI result is historical evidence for `50c9b56`, not a test of this branch. No final-commit CI ran because this local branch was not pushed. The desktop/mobile viewport browser checks do not substitute for actual phones. Production migration, private bucket/RLS, and signing-key agreement still require an authorized read-only readiness check before launch.
+
+## Post-audit follow-up (2026-10-04)
+
+The Sprint 5.3 branch was subsequently pushed and its exact commit `6635e2676f8e02f67cfb04cb866e44977e796527` [passed CI](https://github.com/IgnasGaj/pirkejo_skydas/actions/runs/37135349992). The [post-Sprint 5.3 audit](sprint-05-3-audit.md) then identified A1–A3. The fixes are on `feature/sprint-05-3-audit-fixes`, with final code commit `b1d129fcd5d59f7124cf32bd5f7dca2d85ce4dc2`; see the [audit-fix implementation report](sprint-05-3-audit-fixes-report.md) for behavior and tests. CI [passed](https://github.com/IgnasGaj/pirkejo_skydas/actions/runs/37138226316) for the earlier fix commit `63a235e426b5a7d44f121076b67769a12734f1c9`. The final code commit remains local, so it has no exact-commit CI result. No merge or deployment occurred.
